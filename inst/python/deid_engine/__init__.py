@@ -11,13 +11,17 @@ land per phase (see docs/roadmap.md).
 from .core import (
     ACTION_CODES,
     engine_info,
-    deidentify_study,   # Phase 1/3
-    scan_residual,      # Phase 6
+    deidentify_dataset,  # Phase 1
+    deidentify_study,    # Phase 1/3
+    deid_run,            # Phase 1 high-level entry (used by the R UI)
+    scan_residual,       # Phase 6
 )
 
 __all__ = [
     "ACTION_CODES",
     "engine_info",
+    "deidentify_dataset",
     "deidentify_study",
+    "deid_run",
     "scan_residual",
 ]

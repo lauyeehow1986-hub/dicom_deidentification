@@ -1,23 +1,87 @@
-#' Interactive de-identification of a single folder/study, with before/after review.
-#' Phase 1 (metadata core) + Phase 3 (pixel viewer/redaction).
+#' Interactive de-identification of a single folder, with before/after review.
+#' Phase 1 (metadata core). Phase 3 adds the pixel viewer + manual redaction.
 
 mod_interactive_ui <- function(id) {
   ns <- shiny::NS(id)
-  placeholder_panel(
-    "Interactive de-identification", "Phase 1 & 3",
-    bullets = c(
-      "Pick an input folder (DICOM/NIfTI) and a profile; run de-identification.",
-      "Before/after metadata diff table (per-tag action, original vs replacement).",
-      "Frame/cine/RGB image viewer with auto-proposed + manual redaction boxes.",
-      "Write valid, viewable DICOM (incl. compressed) to an output folder."
+  bslib::layout_sidebar(
+    sidebar = bslib::sidebar(
+      width = 380,
+      shiny::textInput(ns("input_dir"), "Input folder (DICOM)",
+                       placeholder = "C:/path/to/study"),
+      shiny::textInput(ns("output_dir"), "Output folder",
+                       placeholder = "C:/path/to/output"),
+      shiny::selectInput(ns("profile"), "Profile", choices = c("default")),
+      shiny::checkboxInput(ns("reversible"),
+                           "Reversible (keep re-identification key)", value = FALSE),
+      shiny::conditionalPanel(
+        condition = sprintf("input['%s'] == true", ns("reversible")),
+        shiny::textInput(ns("keystore"), "Keystore file",
+                         placeholder = "C:/keys/study.keystore"),
+        shiny::passwordInput(ns("passphrase"), "Keystore passphrase")
+      ),
+      shiny::actionButton(ns("run"), "De-identify", class = "btn-primary",
+                          icon = shiny::icon("user-shield")),
+      shiny::hr(),
+      shiny::uiOutput(ns("summary"))
+    ),
+    bslib::card(
+      bslib::card_header("Before / after \u2014 first file"),
+      bslib::card_body(shiny::tableOutput(ns("diff")))
     )
   )
 }
 
 mod_interactive_server <- function(id, app_state) {
   shiny::moduleServer(id, function(input, output, session) {
-    # TODO(Phase 1/3): folder pick -> call_engine('deidentify_study', ...) ->
-    # metadata diff + viewer.
-    invisible(NULL)
+    result <- shiny::reactiveVal(NULL)
+
+    shiny::observeEvent(input$run, {
+      shiny::req(input$input_dir, input$output_dir)
+      if (!isTRUE(app_state$engine$available)) {
+        shiny::showNotification("Python engine not configured \u2014 see docs/airgap-install.md.",
+                                type = "error"); return()
+      }
+      if (isTRUE(input$reversible) && (!nzchar(input$keystore %||% "") ||
+                                       !nzchar(input$passphrase %||% ""))) {
+        shiny::showNotification("Reversible mode needs a keystore file and passphrase.",
+                                type = "error"); return()
+      }
+      ks <- if (isTRUE(input$reversible)) input$keystore else NULL
+      pw <- if (isTRUE(input$reversible)) input$passphrase else NULL
+
+      out <- tryCatch(
+        engine_deid_run(input$input_dir, input$output_dir, input$profile, ks, pw),
+        error = function(e) {
+          shiny::showNotification(paste("Error:", conditionMessage(e)), type = "error")
+          NULL
+        }
+      )
+      result(out)
+      if (!is.null(out)) {
+        shiny::showNotification(sprintf("Processed %d file(s).", out$count %||% 0),
+                                type = "message")
+      }
+    })
+
+    output$diff <- shiny::renderTable({
+      r <- result(); shiny::req(r)
+      shiny::validate(shiny::need(length(r$files) > 0, "No DICOM files found."))
+      records_to_df(r$files[[1]]$records)
+    }, striped = TRUE, spacing = "xs", width = "100%")
+
+    output$summary <- shiny::renderUI({
+      r <- result()
+      if (is.null(r)) {
+        return(shiny::p(class = "text-muted small",
+                        "Choose a folder and profile, then run."))
+      }
+      shiny::tagList(
+        shiny::p(shiny::strong(sprintf("%d file(s) processed", r$count %||% 0))),
+        shiny::p(class = "small",
+                 if (isTRUE(r$reversible))
+                   "Reversible \u2014 crosswalk saved to the keystore."
+                 else "Irreversible \u2014 no re-identification key was kept.")
+      )
+    })
   })
 }

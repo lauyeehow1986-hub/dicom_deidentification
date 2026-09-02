@@ -46,3 +46,13 @@ call_engine <- function(fn, ...) {
   if (!h$available) stop("Python engine unavailable: ", h$reason, call. = FALSE)
   do.call(h$module[[fn]], list(...))
 }
+
+#' De-identify a folder/file via the engine (Phase 1 high-level entry).
+#'
+#' @param keystore_path NULL -> irreversible (ephemeral); a path -> reversible,
+#'   creating or opening an encrypted keystore protected by `passphrase`.
+#' @return the engine report (per-file records + counts) as an R list.
+engine_deid_run <- function(input_path, output_path, profile_id = "default",
+                            keystore_path = NULL, passphrase = NULL) {
+  call_engine("deid_run", input_path, output_path, profile_id, keystore_path, passphrase)
+}

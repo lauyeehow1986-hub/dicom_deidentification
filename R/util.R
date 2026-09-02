@@ -44,6 +44,38 @@ app_root <- function(start = getwd()) {
   NULL
 }
 
+#' Null-coalescing helper.
+`%||%` <- function(a, b) if (is.null(a) || length(a) == 0) b else a
+
+#' Truncate a value to a readable length for the diff table.
+trunc_str <- function(x, n = 60) {
+  if (is.null(x)) return("")
+  s <- paste(as.character(x), collapse = ", ")
+  if (nchar(s) > n) paste0(substr(s, 1, n), "…") else s
+}
+
+#' Convert the engine's change records (a list of per-tag dicts from reticulate)
+#' into a data.frame for the before/after diff table.
+records_to_df <- function(records) {
+  if (is.null(records) || length(records) == 0) {
+    return(data.frame(Tag = character(), Field = character(), Action = character(),
+                      Original = character(), Result = character()))
+  }
+  rows <- lapply(records, function(r) {
+    tag <- r$tag
+    result <- if (isTRUE(r$removed)) "(removed)" else r$result
+    data.frame(
+      Tag      = if (!is.null(tag)) sprintf("0x%08X", as.integer(tag)) else "",
+      Field    = r$keyword %||% "",
+      Action   = r$action %||% "",
+      Original = trunc_str(r$original),
+      Result   = trunc_str(result),
+      stringsAsFactors = FALSE
+    )
+  })
+  do.call(rbind, rows)
+}
+
 #' A consistent placeholder card used by scaffold-stage module tabs.
 placeholder_panel <- function(title, phase, bullets = character()) {
   bslib::card(

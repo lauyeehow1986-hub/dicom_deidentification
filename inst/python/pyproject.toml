@@ -15,6 +15,7 @@ dependencies = [
     "numpy>=1.26",
     "pillow>=10.0",
     "nibabel>=5.2",               # NIfTI
+    "cryptography>=42.0",         # encrypted keystore (scrypt KDF + AEAD)
 ]
 
 [project.optional-dependencies]
