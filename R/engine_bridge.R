@@ -75,3 +75,40 @@ engine_pixel_redact <- function(input_path, output_path, boxes = NULL,
                                 strip_audio = TRUE) {
   call_engine("pixel_redact", input_path, output_path, boxes, strip_audio)
 }
+
+#' Phase 4 entries: per-project profiles + the tag-a-miss self-improvement loop.
+
+#' List selectable profiles (shipped defaults + workspace project profiles).
+engine_profiles_list <- function() {
+  call_engine("profiles_list")
+}
+
+#' Load the effective profile for an id (workspace copy wins over shipped).
+engine_profile_get <- function(profile_id = "default") {
+  call_engine("profile_get", profile_id)
+}
+
+#' Persist a profile to the writable workspace (never the shipped package).
+engine_profile_save <- function(profile_id, profile) {
+  call_engine("profile_save", profile_id, profile)
+}
+
+#' Copy an existing profile into the workspace under a new id.
+engine_profile_clone <- function(src_id, new_id, label = NULL) {
+  call_engine("profile_clone", src_id, new_id, label)
+}
+
+#' Capture a missed identifier: always stores a labeled example, and (per `fix`)
+#' grows the project gazetteer and/or appends a custom-regex rule.
+#' @param fix character vector subset of c("gazetteer", "regex"); empty = store only.
+engine_tag_capture <- function(category, value, profile_id = "default",
+                               fix = "gazetteer", pattern = NULL,
+                               source = NULL, context = NULL, score = 1.0) {
+  call_engine("tag_capture", category, value, profile_id,
+              as.list(fix), pattern, source, context, score)
+}
+
+#' Export captured labeled examples as a training-ready NER dataset (fine-tune hook).
+engine_ner_export <- function(out_path = NULL) {
+  call_engine("ner_export_examples", out_path)
+}

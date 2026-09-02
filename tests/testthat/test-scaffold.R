@@ -44,6 +44,18 @@ test_that("records_to_df surfaces text-scan detections in a Detected column", {
   expect_identical(df$Detected[df$Field == "PatientName"], "")  # no detections -> blank
 })
 
+test_that("tagging categories are read from the identifier catalog", {
+  ch <- tagging_categories()
+  expect_true(length(ch) >= 15)
+  expect_true(all(c("names", "national_id", "telephone") %in% unname(ch)))
+  expect_false(any(!nzchar(unname(ch))))  # no empty ids
+})
+
+test_that("Phase 4 module UIs build without error", {
+  expect_error(mod_rules_editor_ui("rules"), NA)
+  expect_error(mod_tagging_ui("tagging"), NA)
+})
+
 test_that("top-level UI builds without error", {
   expect_error(app_ui(), NA)
 })

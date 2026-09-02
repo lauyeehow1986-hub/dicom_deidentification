@@ -4,11 +4,20 @@
 #' auth.R / shinymanager; at scaffold stage every tab is visible.
 app_server <- function(input, output, session) {
 
+  # The writable workspace (per-project profiles, grown gazetteers, labeled
+  # examples) lives next to the app unless the air-gapped box overrides it.
+  if (!nzchar(Sys.getenv("DICOMDEID_WORKSPACE"))) {
+    root <- app_root() %||% getwd()
+    Sys.setenv(DICOMDEID_WORKSPACE = file.path(root, "workspace"))
+  }
+
   # Shared application state passed to modules (profile, engine handle, role, ...).
   app_state <- shiny::reactiveValues(
-    role    = "deidentifier",   # deidentifier | reviewer  (set by auth.R later)
-    profile = load_profile("default"),
-    engine  = engine_handle()   # lazy; NULL-safe when the venv isn't built yet
+    role       = "deidentifier",  # deidentifier | reviewer  (set by auth.R later)
+    profile_id = "default",       # active profile the workflow tabs use
+    profile    = load_profile("default"),
+    profiles_version = 0L,         # bumped to refresh profile lists across tabs
+    engine     = engine_handle()  # lazy; NULL-safe when the venv isn't built yet
   )
 
   mod_interactive_server("interactive", app_state)

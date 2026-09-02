@@ -18,14 +18,19 @@ from __future__ import annotations
 
 import base64
 import io
+import json
 import os
 import re
+from pathlib import Path
+
+import yaml
 
 from . import rules as _rules
 from . import pseudonym as _ps
 from . import keystore as _keystore
 from . import textscan as _textscan
 from . import pixels as _pixels
+from . import workspace as _workspace
 from .actions import DeidContext, apply_action
 
 # Text VRs whose values may hide free-text PHI and are auto-scanned (Phase 2)
@@ -180,14 +185,20 @@ def _build_scanner(td: dict, known_values):
     scanner degrades to the deterministic layers and notes why).
     """
     names = list(td.get("gazetteer") or [])
-    gfile = _resolve_gazetteer(td.get("gazetteer_file"))
-    if gfile:
-        with open(gfile, encoding="utf-8") as fh:
-            names += [ln.strip() for ln in fh
-                      if ln.strip() and not ln.lstrip().startswith("#")]
+    files = []
+    if td.get("gazetteer_file"):
+        files.append(td["gazetteer_file"])
+    files += list(td.get("extra_gazetteer_files") or [])  # grown by tagging misses
+    for gf in files:
+        gfile = _resolve_gazetteer(gf)
+        if gfile:
+            with open(gfile, encoding="utf-8") as fh:
+                names += [ln.strip() for ln in fh
+                          if ln.strip() and not ln.lstrip().startswith("#")]
     gaz = _textscan.Gazetteer(names) if names else None
     return _textscan.TextScanner(
         known_values=known_values, gazetteer=gaz,
+        custom_regex=td.get("custom_regex") or [],
         use_presidio=bool(td.get("use_presidio", False)),
         use_ner=bool(td.get("use_ner", False)),
         ner_model=td.get("ner_model"))
@@ -324,7 +335,7 @@ def deid_run(input_path: str, output_path: str, profile_id: str = "default",
     irreversible one when no path is given), de-identifies, and returns the
     per-file report with human-readable change records.
     """
-    profile = _rules.load_profile(profile_id)
+    profile = profile_get(profile_id)
     if keystore_path:
         if os.path.exists(keystore_path):
             ks_obj = _keystore.open(keystore_path, passphrase)
@@ -338,6 +349,152 @@ def deid_run(input_path: str, output_path: str, profile_id: str = "default",
         ks_obj.save()
     report["reversible"] = bool(keystore_path)
     return report
+
+
+# --------------------------------------------------------------------------- #
+# Phase 4 - per-project profiles + the tag-a-miss self-improvement loop        #
+# --------------------------------------------------------------------------- #
+
+_PROFILE_SUFFIX = "_profile.yml"
+
+
+def _workspace_profile_path(profile_id: str) -> Path:
+    return _workspace.profiles_dir() / f"{profile_id}{_PROFILE_SUFFIX}"
+
+
+def _shipped_profile_ids() -> list[str]:
+    return sorted(p.name[: -len(_PROFILE_SUFFIX)]
+                  for p in _rules.PROFILE_DIR.glob(f"*{_PROFILE_SUFFIX}"))
+
+
+def profile_get(profile_id: str = "default") -> dict:
+    """The effective profile for an id. A workspace copy (edited/cloned in the
+    app) wins over the shipped default; ``_source`` records which was used."""
+    wp = _workspace_profile_path(profile_id)
+    if wp.exists():
+        prof = yaml.safe_load(wp.read_text(encoding="utf-8")) or {}
+        prof["_source"] = "workspace"
+        return prof
+    prof = _rules.load_profile(profile_id)
+    prof["_source"] = "shipped"
+    return prof
+
+
+def profiles_list() -> list[dict]:
+    """Every selectable profile: shipped defaults plus workspace project profiles
+    (a workspace profile shadows a shipped one of the same id)."""
+    out: dict[str, dict] = {}
+    for pid in _shipped_profile_ids():
+        prof = _rules.load_profile(pid)
+        out[pid] = {"id": pid, "label": prof.get("label", pid),
+                    "based_on": prof.get("based_on", ""), "source": "shipped"}
+    for p in sorted(_workspace.profiles_dir().glob(f"*{_PROFILE_SUFFIX}")):
+        pid = p.name[: -len(_PROFILE_SUFFIX)]
+        prof = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+        out[pid] = {"id": pid, "label": prof.get("label", pid),
+                    "based_on": prof.get("based_on", ""), "source": "workspace"}
+    return list(out.values())
+
+
+def profile_save(profile_id: str, profile: dict) -> dict:
+    """Persist a profile to the writable workspace (never the shipped package)."""
+    prof = {k: v for k, v in dict(profile).items() if k != "_source"}
+    prof["profile_id"] = profile_id
+    path = _workspace_profile_path(profile_id)
+    path.write_text(yaml.safe_dump(prof, sort_keys=False, allow_unicode=True),
+                    encoding="utf-8")
+    return {"path": str(path), "profile_id": profile_id}
+
+
+def profile_clone(src_id: str, new_id: str, label: str | None = None) -> dict:
+    """Copy an existing profile into the workspace under a new id."""
+    prof = profile_get(src_id)
+    prof.pop("_source", None)
+    prof["profile_id"] = new_id
+    prof["based_on"] = f"clone of {src_id}"
+    if label:
+        prof["label"] = label
+    return profile_save(new_id, prof)
+
+
+def tag_capture(category: str, value: str, profile_id: str = "default",
+                fix=("gazetteer",), pattern: str | None = None,
+                source: str | None = None, context: str | None = None,
+                score: float = 1.0) -> dict:
+    """Feed back a missed identifier. ALWAYS stores a labeled example (for a later
+    NER fine-tune); when ``fix`` asks, it also grows the project's gazetteer
+    and/or appends a custom-regex rule, materialising a workspace copy of the
+    profile so the change takes effect on the next run."""
+    fix = list(fix or [])
+    result: dict = {"category": category, "value": value,
+                    "profile_id": profile_id, "fix": [], "labeled": False}
+
+    result["example"] = _workspace.append_labeled_example(
+        {"category": category, "value": value, "source": source,
+         "context": context, "profile_id": profile_id})
+    result["labeled"] = True
+
+    if not fix:
+        return result
+
+    prof = profile_get(profile_id)
+    prof.pop("_source", None)
+    td = prof.setdefault("text_detection", {})
+    changed = False
+
+    if "gazetteer" in fix and (value or "").strip():
+        gpath = _workspace.append_gazetteer(f"{profile_id}_custom", value)
+        extra = td.setdefault("extra_gazetteer_files", [])
+        if str(gpath) not in extra:
+            extra.append(str(gpath))
+            changed = True
+        result["fix"].append({"type": "gazetteer", "path": str(gpath)})
+
+    if "regex" in fix:
+        if not pattern:
+            raise ValueError("fix 'regex' requires a pattern")
+        rules_list = td.setdefault("custom_regex", [])
+        entry = {"category": category, "pattern": pattern, "score": float(score)}
+        if entry not in rules_list:
+            rules_list.append(entry)
+            changed = True
+        result["fix"].append({"type": "regex", "pattern": pattern,
+                              "category": category})
+
+    if changed:
+        result["profile_path"] = profile_save(profile_id, prof)["path"]
+    return result
+
+
+def ner_export_examples(out_path: str | None = None) -> dict:
+    """Fine-tuning HOOK (stub): turn captured labeled examples into a training-
+    ready JSON-lines file (``{"text", "entities":[[start,end,LABEL]]}``). It does
+    NOT train — an offline ``spacy train`` / transformers fine-tune runs on the
+    air-gapped box, and the app then consumes the model via
+    ``text_detection.ner_model``."""
+    examples = _workspace.read_labeled_examples()
+    out = Path(out_path) if out_path else (_workspace.workspace_dir()
+                                           / "ner_export" / "train.jsonl")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    n = 0
+    with out.open("w", encoding="utf-8") as fh:
+        for ex in examples:
+            value = (ex.get("value") or "").strip()
+            if not value:
+                continue
+            text = ex.get("context") or value
+            start = text.find(value)
+            if start < 0:  # context doesn't contain the value verbatim
+                text, start = value, 0
+            label = (ex.get("category") or "PHI").upper()
+            fh.write(json.dumps(
+                {"text": text, "entities": [[start, start + len(value), label]]},
+                ensure_ascii=False) + "\n")
+            n += 1
+    return {"count": n, "path": str(out),
+            "note": "Training-ready JSONL written. Run an offline fine-tune "
+                    "(spaCy/transformers) on the air-gapped box; point "
+                    "text_detection.ner_model at the resulting model directory."}
 
 
 # --------------------------------------------------------------------------- #
@@ -359,7 +516,7 @@ def pixel_info(path: str, profile_id: str = "default") -> dict:
         "boxes": [], "ocr_note": None,
     }
     if has_pixels:
-        td = (_rules.load_profile(profile_id).get("text_detection") or {})
+        td = (profile_get(profile_id).get("text_detection") or {})
         scanner = _build_scanner(td, _collect_known_values(ds))
         res = _pixels.ocr_phi_boxes(ds, scanner)
         info["boxes"] = res.get("boxes", [])

@@ -157,15 +157,30 @@ class TextScanner:
     _PRESIDIO_KEEP = {"PERSON": "name", "LOCATION": "location"}
 
     def __init__(self, known_values=None, gazetteer=None,
-                 use_presidio=False, use_ner=False,
+                 custom_regex=None, use_presidio=False, use_ner=False,
                  ner_model=None, presidio_languages=("en",),
                  presidio_min_score=0.35):
         self.known_values = list(known_values or [])
         self.gazetteer = gazetteer
         self.presidio_min_score = presidio_min_score
         self.notes: list[str] = []
+        self._custom = self._compile_custom(custom_regex)
         self._analyzer = self._load_presidio(presidio_languages) if use_presidio else None
         self._ner = self._load_ner(ner_model) if use_ner else None
+
+    def _compile_custom(self, specs):
+        """Compile project custom-regex rules (category/pattern/score). A broken
+        pattern is skipped with a note so one bad rule never breaks the scan."""
+        out = []
+        for spec in (specs or []):
+            try:
+                pat = re.compile(spec["pattern"])
+            except Exception as e:  # bad pattern or missing key
+                self.notes.append(f"custom regex skipped ({spec!r}): {e}")
+                continue
+            out.append((spec.get("category", "custom"), pat,
+                        float(spec.get("score", 1.0))))
+        return out
 
     def set_known_values(self, values):
         """Swap in this file's header tokens without rebuilding the (heavy)
@@ -274,6 +289,15 @@ class TextScanner:
             self.notes.append(f"ner scan failed: {ex}")
         return out
 
+    def _custom_spans(self, text: str) -> list[PhiSpan]:
+        spans: list[PhiSpan] = []
+        for cat, pat, score in self._custom:
+            for m in pat.finditer(text):
+                if m.group(0):
+                    spans.append(PhiSpan(m.start(), m.end(), cat,
+                                         m.group(0), "custom_regex", score))
+        return spans
+
     # -- public API --------------------------------------------------------- #
 
     def scan(self, text: str) -> list[PhiSpan]:
@@ -285,6 +309,7 @@ class TextScanner:
             spans += self.gazetteer.find(text)
         for rec in SG_RECOGNISERS:
             spans += rec(text)
+        spans += self._custom_spans(text)
         spans += self._presidio_spans(text)
         spans += self._ner_spans(text)
         return _merge(spans)

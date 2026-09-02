@@ -24,6 +24,12 @@ from .core import (
     pixel_info,          # Phase 3 (viewer geometry + OCR boxes)
     pixel_frame_png,     # Phase 3 (base64 frame preview)
     pixel_redact,        # Phase 3 (apply boxes + strip audio -> valid DICOM)
+    profiles_list,       # Phase 4 (per-project profiles)
+    profile_get,         # Phase 4
+    profile_save,        # Phase 4
+    profile_clone,       # Phase 4
+    tag_capture,         # Phase 4 (tag-a-miss self-improvement)
+    ner_export_examples, # Phase 4 (NER fine-tuning hook, stub)
     scan_residual,       # Phase 6
 )
 
@@ -36,5 +42,11 @@ __all__ = [
     "pixel_info",
     "pixel_frame_png",
     "pixel_redact",
+    "profiles_list",
+    "profile_get",
+    "profile_save",
+    "profile_clone",
+    "tag_capture",
+    "ner_export_examples",
     "scan_residual",
 ]

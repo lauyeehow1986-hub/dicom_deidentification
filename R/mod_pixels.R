@@ -70,7 +70,8 @@ mod_pixels_server <- function(id, app_state) {
 
     shiny::observeEvent(input$load, {
       shiny::req(input$path); if (!engine_ok()) return()
-      out <- tryCatch(engine_pixel_info(input$path), error = function(e) {
+      out <- tryCatch(engine_pixel_info(input$path, app_state$profile_id %||% "default"),
+                      error = function(e) {
         shiny::showNotification(paste("Error:", conditionMessage(e)), type = "error")
         NULL
       })

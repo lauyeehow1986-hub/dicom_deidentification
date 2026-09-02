@@ -35,6 +35,19 @@ mod_interactive_server <- function(id, app_state) {
   shiny::moduleServer(id, function(input, output, session) {
     result <- shiny::reactiveVal(NULL)
 
+    # Offer every profile (shipped + workspace projects), defaulting to the one
+    # made active in the Rules & Profiles tab.
+    shiny::observe({
+      app_state$profiles_version
+      ids <- if (isTRUE(app_state$engine$available)) {
+        tryCatch(vapply(engine_profiles_list(), function(p) p$id, character(1)),
+                 error = function(e) "default")
+      } else "default"
+      if (!length(ids)) ids <- "default"
+      shiny::updateSelectInput(session, "profile", choices = ids,
+                               selected = app_state$profile_id %||% ids[1])
+    })
+
     shiny::observeEvent(input$run, {
       shiny::req(input$input_dir, input$output_dir)
       if (!isTRUE(app_state$engine$available)) {

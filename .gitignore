@@ -36,6 +36,9 @@ inst/models/
 
 # --- app runtime state (keystore, manifests, audit logs live outside git) ---
 /run/
+# self-improvement workspace: per-project profiles, grown gazetteers, labeled
+# examples. May contain identifiers captured from real studies -> never commit.
+/workspace/
 *.sqlite
 *.sqlite3
 keystore/
