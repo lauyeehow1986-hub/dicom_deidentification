@@ -39,6 +39,15 @@ if ($extras.Count -gt 0) {
     uv pip install --python $venv --system-certs -e $here
 }
 
+# Phase 2 Presidio layer needs a spaCy model. Installed as a pinned wheel (no
+# `spacy download`, which ignores --system-certs). Match the model minor version
+# to the installed spaCy (3.8.x -> en_core_web_lg-3.8.0).
+if ($Phi) {
+    $model = "https://github.com/explosion/spacy-models/releases/download/en_core_web_lg-3.8.0/en_core_web_lg-3.8.0-py3-none-any.whl"
+    Write-Host "Installing spaCy model en_core_web_lg (Presidio NER layer)"
+    uv pip install --python $venv --system-certs $model
+}
+
 Write-Host ""
 Write-Host "Done. Verify with:"
 Write-Host "  `$env:DICOMDEID_VENV='$venv'; python -c 'import deid_engine, json; print(json.dumps(deid_engine.engine_info()))'"

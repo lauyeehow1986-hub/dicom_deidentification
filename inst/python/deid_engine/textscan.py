@@ -20,6 +20,11 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+# Loaded engines are cached per process so the (heavy) spaCy / NER models load
+# once, not once per file or per De-identify click.
+_PRESIDIO_CACHE: dict = {}
+_NER_CACHE: dict = {}
+
 
 @dataclass
 class PhiSpan:
@@ -145,11 +150,19 @@ class TextScanner:
     its package or model is missing, so the scanner never hard-fails.
     """
 
+    # Presidio contributes ONLY person/location recall here: names and addresses
+    # the gazetteer misses. Email/phone/NRIC are handled precisely by the
+    # deterministic SG layer, and restricting Presidio to these two entities also
+    # avoids a built-in email/URL recogniser that can hang on some inputs.
+    _PRESIDIO_KEEP = {"PERSON": "name", "LOCATION": "location"}
+
     def __init__(self, known_values=None, gazetteer=None,
                  use_presidio=False, use_ner=False,
-                 ner_model=None, presidio_languages=("en",)):
+                 ner_model=None, presidio_languages=("en",),
+                 presidio_min_score=0.35):
         self.known_values = list(known_values or [])
         self.gazetteer = gazetteer
+        self.presidio_min_score = presidio_min_score
         self.notes: list[str] = []
         self._analyzer = self._load_presidio(presidio_languages) if use_presidio else None
         self._ner = self._load_ner(ner_model) if use_ner else None
@@ -163,6 +176,16 @@ class TextScanner:
     # -- optional layers ---------------------------------------------------- #
 
     def _load_presidio(self, languages):
+        key = tuple(languages)
+        if key not in _PRESIDIO_CACHE:
+            _PRESIDIO_CACHE[key] = self._build_presidio(languages)
+        engine = _PRESIDIO_CACHE[key]
+        if engine is None:
+            self.notes.append("presidio unavailable: no spaCy model installed "
+                              "(deterministic layers still active)")
+        return engine
+
+    def _build_presidio(self, languages):
         # Build ONLY from an already-installed spaCy model. A bare AnalyzerEngine()
         # tries to auto-download its default model, which hangs on the air-gapped
         # box; guarding on installed models makes the missing-model case fail fast.
@@ -170,7 +193,6 @@ class TextScanner:
             import spacy
             installed = set(spacy.util.get_installed_models())
             if not installed:
-                self.notes.append("presidio unavailable: no spaCy model installed")
                 return None
             from presidio_analyzer import AnalyzerEngine
             from presidio_analyzer.nlp_engine import NlpEngineProvider
@@ -183,22 +205,30 @@ class TextScanner:
             engine = AnalyzerEngine(nlp_engine=provider.create_engine())
             register_sg_recognizers(engine.registry)
             return engine
-        except Exception as e:  # noqa: BLE001 - degrade gracefully on air-gapped box
-            self.notes.append(f"presidio unavailable: {e}")
+        except Exception:  # noqa: BLE001 - degrade gracefully on air-gapped box
             return None
 
     def _load_ner(self, ner_model):
-        # Load ONLY from a bundled local model directory. This never touches the
-        # network: on the air-gapped box the installer drops the NER weights and
-        # points text_detection.ner_model at them. Without a local dir we skip the
-        # layer entirely rather than risk a hanging Hub request.
         import os
-        os.environ.setdefault("HF_HUB_OFFLINE", "1")
-        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
         if not ner_model or not os.path.isdir(str(ner_model)):
             self.notes.append("ner unavailable: set text_detection.ner_model to a "
                               "bundled local model directory")
             return None
+        key = os.path.abspath(str(ner_model))
+        if key not in _NER_CACHE:
+            _NER_CACHE[key] = self._build_ner(ner_model)
+        ner = _NER_CACHE[key]
+        if ner is None:
+            self.notes.append(f"ner unavailable: could not load model at {ner_model}")
+        return ner
+
+    def _build_ner(self, ner_model):
+        # Load ONLY from a bundled local model directory. This never touches the
+        # network: on the air-gapped box the installer drops the NER weights and
+        # points text_detection.ner_model at them.
+        import os
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
         try:
             from transformers import (AutoModelForTokenClassification,
                                       AutoTokenizer, pipeline)
@@ -207,19 +237,21 @@ class TextScanner:
                 ner_model, local_files_only=True)
             return pipeline("token-classification", model=mdl, tokenizer=tok,
                             aggregation_strategy="simple")
-        except Exception as e:  # noqa: BLE001
-            self.notes.append(f"ner unavailable: {e}")
+        except Exception:  # noqa: BLE001
             return None
 
     def _presidio_spans(self, text: str) -> list[PhiSpan]:
         if not self._analyzer:
             return []
-        cat = {"PERSON": "name", "EMAIL_ADDRESS": "email", "PHONE_NUMBER": "phone",
-               "LOCATION": "location", "DATE_TIME": "date", "NRP": "name"}
         out: list[PhiSpan] = []
         try:
-            for r in self._analyzer.analyze(text=text, language="en"):
-                out.append(PhiSpan(r.start, r.end, cat.get(r.entity_type, "other"),
+            results = self._analyzer.analyze(text=text, language="en",
+                                             entities=list(self._PRESIDIO_KEEP))
+            for r in results:
+                cat = self._PRESIDIO_KEEP.get(r.entity_type)
+                if cat is None or float(r.score) < self.presidio_min_score:
+                    continue  # drop non-identifier / low-confidence entities
+                out.append(PhiSpan(r.start, r.end, cat,
                                    text[r.start:r.end], "presidio", float(r.score)))
         except Exception as e:  # noqa: BLE001
             self.notes.append(f"presidio scan failed: {e}")

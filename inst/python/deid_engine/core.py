@@ -147,6 +147,21 @@ def _walk(ds, amap, ctx, private_policy, allowlist, records, text_scan) -> None:
             _auto_scan(ds, tagi, ctx, records)
 
 
+def _resolve_gazetteer(gfile):
+    """Resolve a gazetteer path: absolute as-is, else relative to inst/
+    (so profiles can ship a portable ``gazetteers/...`` path). Returns an
+    existing path or None."""
+    if not gfile:
+        return None
+    if os.path.isabs(gfile) and os.path.exists(gfile):
+        return gfile
+    inst_root = _rules.PROFILE_DIR.parent  # inst/
+    cand = os.path.join(str(inst_root), gfile)
+    if os.path.exists(cand):
+        return cand
+    return gfile if os.path.exists(gfile) else None
+
+
 def _build_scanner(td: dict, known_values):
     """Assemble the layered TextScanner from the profile's text_detection block.
 
@@ -156,10 +171,11 @@ def _build_scanner(td: dict, known_values):
     scanner degrades to the deterministic layers and notes why).
     """
     names = list(td.get("gazetteer") or [])
-    gfile = td.get("gazetteer_file")
-    if gfile and os.path.exists(gfile):
+    gfile = _resolve_gazetteer(td.get("gazetteer_file"))
+    if gfile:
         with open(gfile, encoding="utf-8") as fh:
-            names += [ln.strip() for ln in fh if ln.strip()]
+            names += [ln.strip() for ln in fh
+                      if ln.strip() and not ln.lstrip().startswith("#")]
     gaz = _textscan.Gazetteer(names) if names else None
     return _textscan.TextScanner(
         known_values=known_values, gazetteer=gaz,

@@ -79,6 +79,17 @@ def test_encapsulated_document_is_removed():
     assert 0x00420011 not in ds
 
 
+def test_default_profile_gazetteer_catches_a_referrer_name():
+    # The shipped default profile wires the sample gazetteer (relative path,
+    # resolved against inst/), so a name only present in free text -- not in the
+    # header -- is still caught by layer 2.
+    ds = Dataset()
+    ds.PatientName = "Tan Wei Ming"
+    ds.DerivationDescription = "Echo referred by Dr Muthusamy, reviewed."
+    core.deidentify_dataset(ds, rules.load_profile(), b"s" * 16)
+    assert "Muthusamy" not in str(ds.DerivationDescription)
+
+
 def test_clean_text_field_is_left_unchanged():
     ds = Dataset()
     ds.PatientName = "Tan Wei Ming"

@@ -1,0 +1,38 @@
+# Sample Singapore name gazetteer (SYNTHETIC — no real patients).
+# One name (or name token) per line; blank lines and #-comments are ignored.
+# Replace this with your real SingHealth patient-name dictionary on the box:
+# set text_detection.gazetteer_file in the profile to that file's path.
+#
+# Layer 2 of the text scanner (see docs/text-detection.md). Matching is
+# case-insensitive and word-boundary bounded, so "Tan" won't match "Tanjong".
+# Names span the four races + common foreigner names, non-Western included.
+
+# --- Malay ---
+Nurul Aisyah
+Siti Nurhaliza
+Muhammad Firdaus
+Abdullah bin Hassan
+Nur Farah
+
+# --- Chinese ---
+Tan Wei Ming
+Lim Ah Kow
+Ong Bee Hoon
+Wong Kar Wai
+Chua Mei Ling
+
+# --- Indian ---
+Muthusamy
+Ramasamy Pillai
+Kavitha Devi
+Anand Kumar
+Suresh s/o Rajan
+
+# --- Eurasian / other ---
+Sebastian Pereira
+Bernadette de Souza
+
+# --- foreigners (non-Western examples) ---
+Aung Min
+Nguyen Thi Hoa
+Reynaldo Santos

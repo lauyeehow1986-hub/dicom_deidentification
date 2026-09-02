@@ -8,6 +8,13 @@ and the profiles can be wired against a stable interface. Real implementations
 land per phase (see docs/roadmap.md).
 """
 
+import os as _os
+
+# torch (NER) and spaCy/thinc (Presidio) can each load their own OpenMP runtime;
+# on Windows the duplicate-runtime clash can deadlock. Allow it before either is
+# imported. Set once at engine import so both the R-invoked path and tests get it.
+_os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+
 from .core import (
     ACTION_CODES,
     engine_info,

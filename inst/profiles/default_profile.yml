@@ -71,7 +71,7 @@ text_detection:
   enabled: true
   header_token_scrub: true         # PRIMARY: scrub the study's real name/ID tokens everywhere
   fuzzy: true
-  gazetteer_file: ""               # path to the SG multiracial + foreigner name list (one name/line)
+  gazetteer_file: "gazetteers/sg_names_sample.txt"  # relative to inst/; replace with your real SG name list
   use_presidio: true               # general PII; needs a spaCy model bundled on the box
   use_ner: true                    # multilingual XLM-R person/location
   ner_model: ""                    # path to the bundled local NER model DIRECTORY (CPU); empty -> layer off
