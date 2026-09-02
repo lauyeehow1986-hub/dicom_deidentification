@@ -14,7 +14,7 @@ catalog: identifier_catalog.yml
 options:
   clean_descriptors: true          # run the free-text PHI detectors over descriptions/comments
   clean_pixel_data: true           # run OCR + redaction over pixels (burned-in text)
-  retain_longitudinal_temporal: true   # shift dates (preserve intervals) instead of removing
+  retain_longitudinal_temporal: false  # date-shift is OPT-IN (see `dates:` below); off by default
   retain_patient_characteristics: true # keep age/sex/height/weight (research-useful, not direct IDs)
   retain_device_identity: false    # remove per-unit device serials
   retain_institution_identity: false
@@ -27,13 +27,24 @@ reversibility:
   # reversible  -> keystore persists orig<->pseudonym crosswalk + salts + date offsets
   # irreversible-> salts generated per-run and discarded; no keystore written
 
+# --- date handling (shift is OPT-IN, chosen only when needed) ------------------
+dates:
+  mode: remove                     # remove | shift | keep
+  # remove -> X : drop all individual-linked dates (conservative default)
+  # shift  -> S : per-patient, interval-preserving offset; enable ONLY when a study
+  #              genuinely needs longitudinal/4D timing. Offsets are kept in the
+  #              keystore (reversible mode) so intervals stay consistent per patient.
+  # keep   -> K : keep as-is; use only when policy explicitly permits (e.g. dates
+  #              already coarsened to year, or non-linked acquisition timings).
+  offset_days_range: [-365, 365]   # used only when mode: shift
+  precision: day                   # granularity preserved when shifting (day|month|year)
+
 # --- pseudonymisation settings ------------------------------------------------
 pseudonym:
   id_method: salted_sha256         # for MRN / case / visit / national-id (H action)
   salt_source: keystore            # secret salt; never committed
   hash_truncate: 16                # hex chars kept in the emitted pseudonym
   name_style: race_neutral_token   # e.g. "PATIENT_7F3A" rather than a fake real name
-  date_offset_days_range: [-365, 365]  # per-patient random offset, consistent per patient
 
 # --- private-tag policy -------------------------------------------------------
 private_tags:

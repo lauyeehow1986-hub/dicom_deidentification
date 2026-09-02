@@ -53,6 +53,17 @@ def engine_info() -> dict:
         caps["presidio"] = True
     except Exception:
         pass
+    try:
+        import pytesseract  # noqa: F401
+        caps["ocr"] = True
+    except Exception:
+        pass
+    try:
+        import transformers  # noqa: F401
+        import torch  # noqa: F401
+        caps["ner"] = True
+    except Exception:
+        pass
     return {"version": "0.0.1", "capabilities": caps, "actions": ACTION_CODES}
 
 

@@ -170,7 +170,7 @@ categories:
   - id: linked_dates
     label: "Individual-linked dates (admission/discharge/birth/etc.)"
     priority: high
-    relaxable: true                # profile may S (shift) or K (keep)
+    relaxable: true                # governed by profile `dates.mode`
     dicom_tags:
       - "(0008,0020) StudyDate"
       - "(0008,0021) SeriesDate"
@@ -180,8 +180,9 @@ categories:
       - "(0010,0030) PatientBirthDate"
       - "(0038,0020) AdmittingDate"
       - "(0038,0021) AdmittingTime"
-    action: S                      # default: shift preserving per-patient intervals
-    replacement: patient_date_offset
+    action: profile_dates          # resolved from profile `dates.mode`: remove(X) | shift(S) | keep(K)
+    default_mode: remove           # shift is OPT-IN, enabled only when a study needs it
+    replacement: patient_date_offset  # used only when mode: shift
 
 # ---------------------------------------------------------------------------
 # Referential-integrity handling (not a "direct identifier" but must be remapped
