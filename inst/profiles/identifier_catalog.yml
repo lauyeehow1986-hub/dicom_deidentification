@@ -167,6 +167,18 @@ categories:
     action: X
     freetext_action: C
 
+  - id: encapsulated_documents
+    label: "Encapsulated documents (embedded PDF / CDA)"
+    priority: critical
+    dicom_tags:
+      - "(0042,0011) EncapsulatedDocument"   # embedded PDF/CDA byte stream
+    action: X
+    note: >
+      Removed wholesale: the embedded document's text is not yet extracted and
+      scrubbed in place (no PDF text layer bundled). A later phase can extract,
+      scrub and re-embed. DocumentTitle (0042,0010) is a text VR and is caught by
+      the free-text scanner.
+
   - id: linked_dates
     label: "Individual-linked dates (admission/discharge/birth/etc.)"
     priority: high

@@ -59,12 +59,19 @@ pixel:
   fill: black
   strip_audio: true
 
-# --- name-detection ensemble --------------------------------------------------
-names:
-  header_token_scrub: true         # PRIMARY: scrub the real PatientName tokens everywhere
+# --- text PHI detection (free-text tags, private text, SR content) ------------
+# Layered scanner (see docs/text-detection.md). The deterministic layers ALWAYS
+# run on the air-gapped box: header-token scrub (the study's real name/ID tokens
+# hunted everywhere) + SG recognisers (NRIC/FIN checksum, phone, email). The
+# gazetteer and the statistical layers light up when their data/model is present;
+# otherwise the engine degrades to the deterministic layers and says so in its
+# notes. It runs over every text VR the action map does not already cover,
+# recursing into sequences (e.g. SR ContentSequence).
+text_detection:
+  enabled: true
+  header_token_scrub: true         # PRIMARY: scrub the study's real name/ID tokens everywhere
   fuzzy: true
-  gazetteer: true                  # user-supplied SG multiracial + foreigner name dictionary
-  presidio: true
-  transformer_ner:
-    enabled: true
-    model: multilingual_xlmr       # CPU-only; see docs/airgap-install.md for the model bundle
+  gazetteer_file: ""               # path to the SG multiracial + foreigner name list (one name/line)
+  use_presidio: true               # general PII; needs a spaCy model bundled on the box
+  use_ner: true                    # multilingual XLM-R person/location
+  ner_model: ""                    # path to the bundled local NER model DIRECTORY (CPU); empty -> layer off

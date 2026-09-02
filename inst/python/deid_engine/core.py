@@ -22,7 +22,12 @@ import re
 from . import rules as _rules
 from . import pseudonym as _ps
 from . import keystore as _keystore
+from . import textscan as _textscan
 from .actions import DeidContext, apply_action
+
+# Text VRs whose values may hide free-text PHI and are auto-scanned (Phase 2)
+# when no explicit action already covers the element.
+_TEXT_VRS = {"LO", "SH", "ST", "LT", "UT", "PN", "UC"}
 
 # Tags whose values seed the header-token scrub of free text / pixels.
 _KNOWN_VALUE_TAGS = (
@@ -108,29 +113,68 @@ def _collect_known_values(ds) -> list[str]:
     return [v for v in vals if v]
 
 
-def _walk(ds, amap, ctx, private_policy, allowlist, records) -> None:
+def _auto_scan(ds, tag, ctx, records) -> None:
+    """Run the text scanner over an unmapped text element; record only if it
+    actually redacted something (keeps clean fields untouched, no noise)."""
+    if ctx.scanner is None:
+        return
+    rec = apply_action(ds, tag, "C", ctx)
+    if "note" in rec:
+        return
+    if rec.get("result") != rec.get("original"):
+        rec["auto"] = True
+        records.append(rec)
+
+
+def _walk(ds, amap, ctx, private_policy, allowlist, records, text_scan) -> None:
     """Depth-first application of actions, recursing into sequences (SQ)."""
     for tag in list(ds.keys()):
         elem = ds[tag]
         if elem.VR == "SQ":
             for item in elem.value:
-                _walk(item, amap, ctx, private_policy, allowlist, records)
+                _walk(item, amap, ctx, private_policy, allowlist, records, text_scan)
             continue
         tagi = int(tag)
         if tagi in amap:
             records.append(apply_action(ds, tagi, amap[tagi], ctx))
         elif _is_private(tagi):
             if private_policy == "keep_all" or tagi in allowlist:
+                if text_scan and elem.VR in _TEXT_VRS:
+                    _auto_scan(ds, tagi, ctx, records)  # scrub kept private text
                 continue
             records.append(apply_action(ds, tagi, "X", ctx))
+        elif text_scan and elem.VR in _TEXT_VRS:
+            _auto_scan(ds, tagi, ctx, records)
 
 
-def deidentify_dataset(ds, profile: dict, salt: bytes) -> dict:
+def _build_scanner(td: dict, known_values):
+    """Assemble the layered TextScanner from the profile's text_detection block.
+
+    Deterministic layers (header tokens + SG recognisers) always run. A gazetteer
+    is loaded from an inline list and/or a name file; Presidio / transformer NER
+    light up only if enabled *and* their packages/models are present (else the
+    scanner degrades to the deterministic layers and notes why).
+    """
+    names = list(td.get("gazetteer") or [])
+    gfile = td.get("gazetteer_file")
+    if gfile and os.path.exists(gfile):
+        with open(gfile, encoding="utf-8") as fh:
+            names += [ln.strip() for ln in fh if ln.strip()]
+    gaz = _textscan.Gazetteer(names) if names else None
+    return _textscan.TextScanner(
+        known_values=known_values, gazetteer=gaz,
+        use_presidio=bool(td.get("use_presidio", False)),
+        use_ner=bool(td.get("use_ner", False)),
+        ner_model=td.get("ner_model"))
+
+
+def deidentify_dataset(ds, profile: dict, salt: bytes, scanner=None) -> dict:
     """De-identify a pydicom Dataset in place; return a change report.
 
-    This is the metadata core (Phase 1): PS3.15 actions with sequence recursion,
-    private-tag policy, deterministic pseudonymisation/UID-remap, opt-in
-    date-shift, and header-token scrubbing of free text.
+    PS3.15 actions with sequence recursion, private-tag policy, deterministic
+    pseudonymisation/UID-remap, opt-in date-shift, header-token scrubbing, and the
+    Phase 2 layered text scanner. Pass ``scanner`` to reuse one (heavy optional
+    layers loaded once) across a study; otherwise one is built from the profile.
     """
     catalog = _rules.load_catalog()
     amap = _rules.build_action_map(catalog, profile)
@@ -141,15 +185,24 @@ def deidentify_dataset(ds, profile: dict, salt: bytes) -> dict:
     date_offset = _ps.date_offset_days(patient_key, salt, int(lo), int(hi))
     truncate = int((profile.get("pseudonym") or {}).get("hash_truncate", 16))
 
+    td = profile.get("text_detection") or {}
+    text_scan = td.get("enabled", True)
+    if not text_scan:
+        scanner = None
+    elif scanner is None:
+        scanner = _build_scanner(td, known_values)
+    else:
+        scanner.set_known_values(known_values)  # reuse across files
+
     ctx = DeidContext(salt=salt, truncate=truncate, date_offset=date_offset,
-                      known_values=known_values, uid_cache={})
+                      known_values=known_values, uid_cache={}, scanner=scanner)
 
     pt = profile.get("private_tags") or {}
     private_policy = pt.get("policy", "strip_unknown")
     allowlist = {t for t in (_rules.parse_tag(x) for x in (pt.get("allowlist") or [])) if t}
 
     records: list[dict] = []
-    _walk(ds, amap, ctx, private_policy, allowlist, records)
+    _walk(ds, amap, ctx, private_policy, allowlist, records, text_scan)
 
     changed = [r for r in records if r.get("action") != "K" and "note" not in r]
     by_action: dict[str, int] = {}
@@ -191,6 +244,11 @@ def deidentify_study(input_path: str, output_path: str, profile: dict, keystore)
     single_file = not os.path.isdir(input_path)
     files_report = []
 
+    # Build the scanner once per study so the optional Presidio/NER models load a
+    # single time and are reused across every file in the batch.
+    td = profile.get("text_detection") or {}
+    scanner = _build_scanner(td, []) if td.get("enabled", True) else None
+
     for full, rel in _iter_input_files(input_path):
         out = output_path if single_file else os.path.join(output_path, rel)
         try:
@@ -200,7 +258,7 @@ def deidentify_study(input_path: str, output_path: str, profile: dict, keystore)
                                  "skipped": f"not readable as DICOM: {e}"})
             continue
 
-        report = deidentify_dataset(ds, profile, salt)
+        report = deidentify_dataset(ds, profile, salt, scanner=scanner)
         _record_crosswalk(keystore, report["records"])
         enriched = _enrich_records(report["records"])
 

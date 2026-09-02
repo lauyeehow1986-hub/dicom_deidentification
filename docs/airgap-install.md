@@ -36,7 +36,13 @@ pwsh inst/python/build_venv.ps1 -Phi -Ner     # base + Presidio/OCR + transforme
 
 Then place, inside the distributed folder:
 - `inst/python/.venv/`  — the relocatable venv
-- `inst/models/`        — the NER model weights (gitignored; too big for git)
+- `inst/models/<name>/` — the transformer-NER model **directory** (gitignored; too big for
+  git). Point `text_detection.ner_model` at this path in the profile. The engine loads it
+  **local-only** and never reaches the network, so a missing/misconfigured path just
+  disables the NER layer (the deterministic layers still run) — see
+  [text-detection.md](text-detection.md).
+- a **spaCy model** installed into the venv (e.g. `en_core_web_lg`) so the Presidio layer
+  can build; without it, Presidio is skipped and the deterministic layers carry text detection.
 - the **Tesseract OCR binary** (needed by `presidio-image-redactor`) — a portable copy, no admin
 
 ### Wiring R -> Python on the target

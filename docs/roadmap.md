@@ -6,8 +6,8 @@ running acceptance test from Phase 1 onward.
 | Phase | Theme | Key deliverables |
 |------|-------|------------------|
 | **0** | Reset & scaffold | Standalone repo; R app shell (all tabs); identifier catalog + default profile; engine bridge + relocatable `uv` venv build script; docs; test scaffold. **(done)** |
-| **1** | Metadata de-id core | pydicom rules engine applying PS3.15 action codes recursing into SQ; private-tag policy; salted-SHA-256 pseudonymisation; UID remap; interval-preserving date-shift; encrypted keystore + crosswalk; interactive one-folder flow with before/after metadata diff. |
-| **2** | Text PHI detection | Presidio + SG custom recognisers (NRIC/FIN checksum, postal/phone/email/passport) + gazetteer + header-token scrub + transformer NER over free-text/private tags, SR, encapsulated PDF. |
+| **1** | Metadata de-id core | pydicom rules engine applying PS3.15 action codes recursing into SQ; private-tag policy; salted-SHA-256 pseudonymisation; UID remap; interval-preserving date-shift; encrypted keystore + crosswalk; interactive one-folder flow with before/after metadata diff. **(done)** |
+| **2** | Text PHI detection | Layered scanner ([docs/text-detection.md](text-detection.md)): header-token scrub + gazetteer + SG recognisers (NRIC/FIN checksum, phone, email) always-on; Presidio + transformer NER optional/graceful. Runs over every text VR (incl. nested SR ContentSequence); encapsulated PDF removed. **(done)** |
 | **3** | Pixel / burned-in PHI | Frame/cine/RGB viewer; OCR+NER auto-redaction + manual boxes; re-encode valid DICOM incl. compressed (JPEG2000); audio/waveform strip; optional defacing. |
 | **4** | Profiles & self-improvement | Rules/profile editor; per-project profiles; tag-a-miss capture -> gazetteer/regex + labeled-example store; NER fine-tuning hook. |
 | **5** | Bulk engine | SQLite manifest job queue; mirai/future parallel workers; resumable/checkpointed; ~2 TB streaming; progress dashboard. |

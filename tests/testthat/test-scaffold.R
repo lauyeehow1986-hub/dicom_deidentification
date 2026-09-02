@@ -30,6 +30,20 @@ test_that("engine bridge degrades gracefully when the venv is absent", {
   expect_type(h$reason, "character")
 })
 
+test_that("records_to_df surfaces text-scan detections in a Detected column", {
+  recs <- list(
+    list(tag = 0x00082111L, keyword = "DerivationDescription", action = "C",
+         original = "NRIC S1234567D", result = "NRIC ",
+         categories = list("nric_fin", "phone")),
+    list(tag = 0x00100010L, keyword = "PatientName", action = "D",
+         original = "Tan Wei Ming", result = "ANON^AB12")
+  )
+  df <- records_to_df(recs)
+  expect_true("Detected" %in% names(df))
+  expect_identical(df$Detected[df$Field == "DerivationDescription"], "nric_fin, phone")
+  expect_identical(df$Detected[df$Field == "PatientName"], "")  # no detections -> blank
+})
+
 test_that("top-level UI builds without error", {
   expect_error(app_ui(), NA)
 })

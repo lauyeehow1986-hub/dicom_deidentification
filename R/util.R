@@ -59,15 +59,20 @@ trunc_str <- function(x, n = 60) {
 records_to_df <- function(records) {
   if (is.null(records) || length(records) == 0) {
     return(data.frame(Tag = character(), Field = character(), Action = character(),
-                      Original = character(), Result = character()))
+                      Detected = character(), Original = character(),
+                      Result = character()))
   }
   rows <- lapply(records, function(r) {
     tag <- r$tag
     result <- if (isTRUE(r$removed)) "(removed)" else r$result
+    detected <- if (!is.null(r$categories) && length(r$categories)) {
+      paste(unlist(r$categories), collapse = ", ")
+    } else ""
     data.frame(
       Tag      = if (!is.null(tag)) sprintf("0x%08X", as.integer(tag)) else "",
       Field    = r$keyword %||% "",
       Action   = r$action %||% "",
+      Detected = detected,
       Original = trunc_str(r$original),
       Result   = trunc_str(result),
       stringsAsFactors = FALSE

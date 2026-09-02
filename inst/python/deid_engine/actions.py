@@ -21,6 +21,7 @@ class DeidContext:
     date_offset: int = 0
     known_values: list[str] = field(default_factory=list)
     uid_cache: dict[str, str] = field(default_factory=dict)
+    scanner: Any = None  # Phase 2 TextScanner (layered PHI detection)
 
 
 def _pseudonym_for_vr(original: str, vr: str, ctx: DeidContext) -> str:
@@ -80,7 +81,13 @@ def apply_action(ds, tag: int, code: str, ctx: DeidContext) -> dict[str, Any]:
             elem.value = ps.shift_dicom_date(orig_str, ctx.date_offset)
         # TM/DT and non-date VRs are left untouched at this phase
     elif code == "C":
-        elem.value = _scrub_known(orig_str, ctx.known_values)
+        if ctx.scanner is not None:
+            redacted, spans = ctx.scanner.redact(orig_str, replacement=" ")
+            elem.value = re.sub(r"\s{2,}", " ", redacted).strip()
+            if spans:
+                rec["categories"] = sorted({s.category for s in spans})
+        else:
+            elem.value = _scrub_known(orig_str, ctx.known_values)
     else:
         rec["note"] = f"unknown action '{code}'"
         rec["result"] = orig_str
