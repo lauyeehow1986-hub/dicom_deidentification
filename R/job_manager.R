@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS files (
   error         TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_files_status ON files(status);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_files_batch_input ON files(batch_id, input_path);
 CREATE TABLE IF NOT EXISTS batches (
   batch_id   TEXT PRIMARY KEY,
   profile_id TEXT,
@@ -33,10 +34,19 @@ CREATE TABLE IF NOT EXISTS batches (
 );
 "
 
+# File extensions we treat as processable volumes/images.
+MANIFEST_EXTS <- c("dcm", "dicom", "ima", "nii", "nii.gz")
+
 #' Open (creating if needed) a manifest database.
+#'
+#' WAL journalling + a generous busy timeout let several parallel workers claim
+#' rows from the same file concurrently without tripping over SQLITE_BUSY.
 manifest_open <- function(path = file.path("run", "manifest.sqlite")) {
   dir.create(dirname(path), showWarnings = FALSE, recursive = TRUE)
   con <- DBI::dbConnect(RSQLite::SQLite(), path)
+  DBI::dbExecute(con, "PRAGMA journal_mode=WAL;")
+  DBI::dbExecute(con, "PRAGMA busy_timeout=30000;")
+  DBI::dbExecute(con, "PRAGMA synchronous=NORMAL;")
   for (stmt in strsplit(MANIFEST_SCHEMA, ";\\s*")[[1]]) {
     stmt <- trimws(stmt)
     if (nzchar(stmt)) DBI::dbExecute(con, stmt)
@@ -46,5 +56,202 @@ manifest_open <- function(path = file.path("run", "manifest.sqlite")) {
 
 manifest_close <- function(con) DBI::dbDisconnect(con)
 
-# TODO(Phase 5): register_batch(), claim_next(), mark_done(), mark_failed(),
-# progress_summary(), and the mirai/future worker pool that drives them.
+# --------------------------------------------------------------------------- #
+# Phase 5 - manifest job queue                                                #
+# --------------------------------------------------------------------------- #
+
+.now <- function() format(Sys.time(), "%Y-%m-%dT%H:%M:%S")
+
+#' Recursively list the DICOM/NIfTI files under a root folder.
+manifest_scan_files <- function(root) {
+  pat <- paste0("\\.(", paste(gsub("\\.", "\\\\.", MANIFEST_EXTS), collapse = "|"),
+                ")$")
+  files <- list.files(root, pattern = pat, recursive = TRUE,
+                      full.names = TRUE, ignore.case = TRUE)
+  # `.nii.gz` also matches the `.gz`-agnostic set above via the alternation.
+  normalizePath(files, winslash = "/", mustWork = FALSE)
+}
+
+# Relative path of `path` beneath `root` (falls back to the basename).
+.rel_under <- function(root, path) {
+  root <- normalizePath(root, winslash = "/", mustWork = FALSE)
+  path <- normalizePath(path, winslash = "/", mustWork = FALSE)
+  if (startsWith(path, paste0(root, "/"))) substring(path, nchar(root) + 2L)
+  else basename(path)
+}
+
+#' Register (or top up) a batch: scan `root_in`, insert a pending row per file
+#' with an output path mirroring its location under `root_out`. Idempotent -
+#' re-registering the same batch adds only files not already present, so a run
+#' can be resumed or a growing folder re-scanned safely.
+register_batch <- function(con, batch_id, root_in, root_out, files = NULL,
+                           profile_id = "default", created_by = NA_character_) {
+  if (is.null(files)) files <- manifest_scan_files(root_in)
+  inserted <- 0L
+  if (length(files)) {
+    out_paths <- vapply(files, function(f)
+      file.path(root_out, .rel_under(root_in, f)), character(1))
+    DBI::dbWithTransaction(con, {
+      rs <- DBI::dbSendStatement(con,
+        "INSERT OR IGNORE INTO files (batch_id, input_path, output_path, status)
+         VALUES (?, ?, ?, 'pending')")
+      DBI::dbBind(rs, list(rep(batch_id, length(files)), unname(files),
+                           unname(out_paths)))
+      inserted <- DBI::dbGetRowsAffected(rs)
+      DBI::dbClearResult(rs)
+    })
+  }
+  total <- DBI::dbGetQuery(con,
+    "SELECT COUNT(*) n FROM files WHERE batch_id = ?", params = list(batch_id))$n
+  total <- as.integer(total)
+  DBI::dbExecute(con,
+    "INSERT INTO batches (batch_id, profile_id, created_at, created_by, total)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(batch_id) DO UPDATE SET total = excluded.total,
+       profile_id = excluded.profile_id",
+    params = list(batch_id, profile_id, .now(), created_by, total))
+  list(batch_id = batch_id, inserted = as.integer(inserted), total = total)
+}
+
+#' Transactionally claim one pending row for `worker`. Returns the row (as a
+#' one-row list) or NULL when the queue is drained. BEGIN IMMEDIATE serialises
+#' the select-then-update so two workers never grab the same file.
+claim_next <- function(con, worker, batch_id = NULL) {
+  # A single UPDATE...RETURNING is atomic: SQLite serialises writers, so a
+  # second worker running this concurrently re-evaluates the subquery and picks
+  # the *next* pending row rather than re-claiming the same one.
+  sel <- "SELECT id FROM files WHERE status='pending'"
+  if (is.null(batch_id)) {
+    sub <- paste(sel, "ORDER BY id LIMIT 1")
+    params <- list(worker, .now())
+  } else {
+    sub <- paste(sel, "AND batch_id=? ORDER BY id LIMIT 1")
+    params <- list(worker, .now(), batch_id)
+  }
+  row <- DBI::dbGetQuery(con, paste0(
+    "UPDATE files SET status='in_progress', worker=?, started_at=?
+     WHERE id = (", sub, ")
+     RETURNING id, input_path, output_path, batch_id"), params = params)
+  if (nrow(row)) as.list(row) else NULL
+}
+
+#' Mark a claimed row finished successfully.
+mark_done <- function(con, id, output_path = NULL, residual_count = NA_integer_,
+                      modality = NULL, transfer_syntax = NULL) {
+  rc <- if (length(residual_count)) residual_count[[1]] else NA_integer_
+  status <- if (!is.na(rc) && rc > 0) "flagged" else "done"
+  nn <- function(x) if (is.null(x) || !length(x)) NA else x[[1]]
+  DBI::dbExecute(con,
+    "UPDATE files SET status=?, finished_at=?, residual_count=?,
+       output_path=COALESCE(?, output_path),
+       modality=COALESCE(?, modality),
+       transfer_syntax=COALESCE(?, transfer_syntax) WHERE id=?",
+    params = list(status, .now(), nn(rc), nn(output_path),
+                  nn(modality), nn(transfer_syntax), id))
+  invisible(status)
+}
+
+#' Mark a claimed row failed, recording the error message.
+mark_failed <- function(con, id, error) {
+  DBI::dbExecute(con,
+    "UPDATE files SET status='failed', finished_at=?, error=? WHERE id=?",
+    params = list(.now(), as.character(error), id))
+  invisible("failed")
+}
+
+#' Re-queue rows a crashed worker left mid-flight (in_progress -> pending).
+reset_stale <- function(con, batch_id = NULL) {
+  if (is.null(batch_id)) {
+    n <- DBI::dbExecute(con,
+      "UPDATE files SET status='pending', worker=NULL, started_at=NULL
+       WHERE status='in_progress'")
+  } else {
+    n <- DBI::dbExecute(con,
+      "UPDATE files SET status='pending', worker=NULL, started_at=NULL
+       WHERE status='in_progress' AND batch_id=?", params = list(batch_id))
+  }
+  as.integer(n)
+}
+
+#' Count rows by status for a batch (or all batches when batch_id is NULL).
+progress_summary <- function(con, batch_id = NULL) {
+  if (is.null(batch_id)) {
+    q <- DBI::dbGetQuery(con, "SELECT status, COUNT(*) n FROM files GROUP BY status")
+  } else {
+    q <- DBI::dbGetQuery(con,
+      "SELECT status, COUNT(*) n FROM files WHERE batch_id=? GROUP BY status",
+      params = list(batch_id))
+  }
+  get <- function(s) { v <- q$n[q$status == s]; if (length(v)) as.integer(v) else 0L }
+  list(
+    total    = sum(as.integer(q$n)),
+    pending  = get("pending"),
+    in_progress = get("in_progress"),
+    done     = get("done"),
+    failed   = get("failed"),
+    flagged  = get("flagged")
+  )
+}
+
+#' Most-recently-touched rows, for the live dashboard table.
+manifest_recent <- function(con, batch_id = NULL, n = 15) {
+  base <- "SELECT input_path, output_path, status, worker, error, finished_at
+           FROM files"
+  ord <- "ORDER BY COALESCE(finished_at, started_at, '') DESC, id DESC LIMIT ?"
+  if (is.null(batch_id)) {
+    DBI::dbGetQuery(con, paste(base, ord), params = list(as.integer(n)))
+  } else {
+    DBI::dbGetQuery(con, paste(base, "WHERE batch_id=?", ord),
+                    params = list(batch_id, as.integer(n)))
+  }
+}
+
+#' All failed rows (input + error), for the retry/triage table.
+manifest_failures <- function(con, batch_id = NULL) {
+  if (is.null(batch_id)) {
+    DBI::dbGetQuery(con, "SELECT input_path, error FROM files WHERE status='failed'")
+  } else {
+    DBI::dbGetQuery(con,
+      "SELECT input_path, error FROM files WHERE status='failed' AND batch_id=?",
+      params = list(batch_id))
+  }
+}
+
+#' The de-id profile registered for a batch (falls back to "default").
+batch_profile <- function(con, batch_id) {
+  v <- DBI::dbGetQuery(con, "SELECT profile_id FROM batches WHERE batch_id=?",
+                       params = list(batch_id))$profile_id
+  if (length(v) && !is.na(v) && nzchar(v)) v else "default"
+}
+
+#' The worker body: claim -> de-identify -> mark, until the queue drains.
+#'
+#' `deid_fn(input_path, output_path, profile_id, keystore_path, passphrase)` does
+#' the actual work and returns the engine report (a list; an optional
+#' `residual_count` flags residual PHI). Injected so it can be unit-tested with a
+#' fake, and so each parallel worker can call the reticulate engine in its own
+#' process. Returns the number of rows this worker processed.
+drain <- function(con, deid_fn, worker = "w1", batch_id = NULL,
+                  profile_id = NULL, keystore_path = NULL,
+                  passphrase = NULL, on_progress = NULL) {
+  processed <- 0L
+  repeat {
+    row <- claim_next(con, worker, batch_id)
+    if (is.null(row)) break
+    pid <- profile_id %||% batch_profile(con, row$batch_id)
+    if (!is.null(row$output_path) && !is.na(row$output_path))
+      dir.create(dirname(row$output_path), showWarnings = FALSE, recursive = TRUE)
+    ok <- tryCatch({
+      rep <- deid_fn(row$input_path, row$output_path, pid,
+                     keystore_path, passphrase)
+      rc <- suppressWarnings(as.integer(rep$residual_count %||% NA))
+      mark_done(con, row$id, residual_count = rc)
+      TRUE
+    }, error = function(e) {
+      mark_failed(con, row$id, conditionMessage(e)); FALSE
+    })
+    processed <- processed + 1L
+    if (is.function(on_progress)) on_progress(progress_summary(con, batch_id))
+  }
+  processed
+}

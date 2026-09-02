@@ -56,6 +56,10 @@ test_that("Phase 4 module UIs build without error", {
   expect_error(mod_tagging_ui("tagging"), NA)
 })
 
+test_that("Phase 5 bulk module UI builds without error", {
+  expect_error(mod_bulk_ui("bulk"), NA)
+})
+
 test_that("top-level UI builds without error", {
   expect_error(app_ui(), NA)
 })
