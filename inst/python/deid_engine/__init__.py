@@ -21,6 +21,9 @@ from .core import (
     deidentify_dataset,  # Phase 1
     deidentify_study,    # Phase 1/3
     deid_run,            # Phase 1 high-level entry (used by the R UI)
+    pixel_info,          # Phase 3 (viewer geometry + OCR boxes)
+    pixel_frame_png,     # Phase 3 (base64 frame preview)
+    pixel_redact,        # Phase 3 (apply boxes + strip audio -> valid DICOM)
     scan_residual,       # Phase 6
 )
 
@@ -30,5 +33,8 @@ __all__ = [
     "deidentify_dataset",
     "deidentify_study",
     "deid_run",
+    "pixel_info",
+    "pixel_frame_png",
+    "pixel_redact",
     "scan_residual",
 ]

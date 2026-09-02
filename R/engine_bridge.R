@@ -56,3 +56,22 @@ engine_deid_run <- function(input_path, output_path, profile_id = "default",
                             keystore_path = NULL, passphrase = NULL) {
   call_engine("deid_run", input_path, output_path, profile_id, keystore_path, passphrase)
 }
+
+#' Phase 3 pixel entries (burned-in PHI viewer + redaction).
+
+#' Geometry + OCR-proposed redaction boxes for a DICOM file.
+engine_pixel_info <- function(path, profile_id = "default") {
+  call_engine("pixel_info", path, profile_id)
+}
+
+#' Base64 PNG of one frame, with `boxes` drawn as outlines (for review).
+#' @param boxes an R list of lists each with x/y/w/h (and optional frame), or NULL.
+engine_pixel_frame_png <- function(path, frame = 0, boxes = NULL, max_side = 640L) {
+  call_engine("pixel_frame_png", path, as.integer(frame), boxes, as.integer(max_side))
+}
+
+#' Apply redaction boxes + strip audio; write a valid, viewable DICOM.
+engine_pixel_redact <- function(input_path, output_path, boxes = NULL,
+                                strip_audio = TRUE) {
+  call_engine("pixel_redact", input_path, output_path, boxes, strip_audio)
+}

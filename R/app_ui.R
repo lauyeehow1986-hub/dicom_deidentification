@@ -10,6 +10,7 @@ app_ui <- function() {
     header = disclaimer_banner(),
 
     bslib::nav_panel("Interactive",  mod_interactive_ui("interactive")),
+    bslib::nav_panel("Pixels",       mod_pixels_ui("pixels")),
     bslib::nav_panel("Rules & Profiles", mod_rules_editor_ui("rules")),
     bslib::nav_panel("Tagging",      mod_tagging_ui("tagging")),
     bslib::nav_panel("Bulk",         mod_bulk_ui("bulk")),

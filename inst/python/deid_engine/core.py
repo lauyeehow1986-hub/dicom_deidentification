@@ -16,6 +16,8 @@ even before the PHI/NER extras are installed.
 
 from __future__ import annotations
 
+import base64
+import io
 import os
 import re
 
@@ -23,6 +25,7 @@ from . import rules as _rules
 from . import pseudonym as _ps
 from . import keystore as _keystore
 from . import textscan as _textscan
+from . import pixels as _pixels
 from .actions import DeidContext, apply_action
 
 # Text VRs whose values may hide free-text PHI and are auto-scanned (Phase 2)
@@ -131,6 +134,12 @@ def _walk(ds, amap, ctx, private_policy, allowlist, records, text_scan) -> None:
     for tag in list(ds.keys()):
         elem = ds[tag]
         if elem.VR == "SQ":
+            tagi = int(tag)
+            # An explicit remove/blank on the sequence itself (e.g. WaveformSequence
+            # -> X) wins over recursing into its items.
+            if tagi in amap and amap[tagi] in ("X", "Z"):
+                records.append(apply_action(ds, tagi, amap[tagi], ctx))
+                continue
             for item in elem.value:
                 _walk(item, amap, ctx, private_policy, allowlist, records, text_scan)
             continue
@@ -329,6 +338,79 @@ def deid_run(input_path: str, output_path: str, profile_id: str = "default",
         ks_obj.save()
     report["reversible"] = bool(keystore_path)
     return report
+
+
+# --------------------------------------------------------------------------- #
+# Phase 3 - pixel / burned-in PHI (high-level entries for the R viewer)        #
+# --------------------------------------------------------------------------- #
+
+def pixel_info(path: str, profile_id: str = "default") -> dict:
+    """Geometry + OCR-proposed redaction boxes for a file, for the viewer."""
+    import pydicom
+    ds = pydicom.dcmread(path)
+    has_pixels = "PixelData" in ds
+    info = {
+        "has_pixels": has_pixels,
+        "frames": int(getattr(ds, "NumberOfFrames", 1) or 1) if has_pixels else 0,
+        "rows": int(getattr(ds, "Rows", 0) or 0),
+        "cols": int(getattr(ds, "Columns", 0) or 0),
+        "samples": int(getattr(ds, "SamplesPerPixel", 1) or 1),
+        "photometric": str(getattr(ds, "PhotometricInterpretation", "")),
+        "boxes": [], "ocr_note": None,
+    }
+    if has_pixels:
+        td = (_rules.load_profile(profile_id).get("text_detection") or {})
+        scanner = _build_scanner(td, _collect_known_values(ds))
+        res = _pixels.ocr_phi_boxes(ds, scanner)
+        info["boxes"] = res.get("boxes", [])
+        info["ocr_note"] = res.get("note")
+    return info
+
+
+def pixel_frame_png(path: str, frame: int = 0, boxes=None, max_side: int = 640) -> str:
+    """A base64 PNG of one frame, with any ``boxes`` drawn as outlines (for review)."""
+    import pydicom
+    from PIL import Image, ImageDraw
+    ds = pydicom.dcmread(path)
+    if bool(ds.file_meta.TransferSyntaxUID.is_compressed):
+        ds.decompress()
+    frames = _pixels.load_frames(ds)
+    frame = max(0, min(int(frame), frames.shape[0] - 1))
+    img = _pixels._frame_to_uint8(frames[frame])
+    pil = Image.fromarray(img)
+    if pil.mode not in ("L", "RGB"):
+        pil = pil.convert("RGB")
+    if boxes:
+        pil = pil.convert("RGB")
+        draw = ImageDraw.Draw(pil)
+        for b in boxes:
+            if b.get("frame") in (None, frame):
+                x, y = int(b["x"]), int(b["y"])
+                draw.rectangle([x, y, x + int(b["w"]), y + int(b["h"])],
+                               outline=(255, 0, 0), width=2)
+    w, h = pil.size
+    scale = min(1.0, max_side / max(w, h)) if max(w, h) else 1.0
+    if scale < 1.0:
+        pil = pil.resize((max(1, int(w * scale)), max(1, int(h * scale))))
+    buf = io.BytesIO()
+    pil.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def pixel_redact(input_path: str, output_path: str, boxes=None,
+                 strip_audio: bool = True) -> dict:
+    """Apply redaction boxes + strip audio; write a valid, viewable DICOM."""
+    import pydicom
+    ds = pydicom.dcmread(input_path)
+    rec = _pixels.redact_pixels(ds, boxes or [])
+    if strip_audio:
+        rec["waveforms_removed"] = _pixels.strip_waveforms(ds)
+    if getattr(ds, "file_meta", None) is not None and "SOPInstanceUID" in ds:
+        ds.file_meta.MediaStorageSOPInstanceUID = ds.SOPInstanceUID
+    os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+    pydicom.dcmwrite(output_path, ds, enforce_file_format=True)
+    rec["output"] = output_path
+    return rec
 
 
 def scan_residual(path: str, catalog: dict) -> dict:

@@ -12,6 +12,7 @@ app_server <- function(input, output, session) {
   )
 
   mod_interactive_server("interactive", app_state)
+  mod_pixels_server("pixels", app_state)
   mod_rules_editor_server("rules", app_state)
   mod_tagging_server("tagging", app_state)
   mod_bulk_server("bulk", app_state)
