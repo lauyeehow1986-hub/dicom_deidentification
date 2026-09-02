@@ -1,0 +1,59 @@
+# =============================================================================
+# Default de-identification profile
+# =============================================================================
+# A profile = the identifier catalog + a set of PS3.15 option toggles + the
+# replacement settings the reviewer can customise per project. Profiles are
+# copied and edited in the app (mod_rules_editor); this is the shipped default.
+# =============================================================================
+
+profile_id: default
+based_on: "DICOM PS3.15 Annex E - Basic Application Level Confidentiality Profile"
+catalog: identifier_catalog.yml
+
+# --- PS3.15 option flags ------------------------------------------------------
+options:
+  clean_descriptors: true          # run the free-text PHI detectors over descriptions/comments
+  clean_pixel_data: true           # run OCR + redaction over pixels (burned-in text)
+  retain_longitudinal_temporal: true   # shift dates (preserve intervals) instead of removing
+  retain_patient_characteristics: true # keep age/sex/height/weight (research-useful, not direct IDs)
+  retain_device_identity: false    # remove per-unit device serials
+  retain_institution_identity: false
+  retain_safe_private: false       # strip unknown private tags (allowlist known-safe only)
+  retain_uids: false               # remap UIDs (U) rather than keep
+
+# --- reversibility ------------------------------------------------------------
+reversibility:
+  mode: reversible                 # reversible | irreversible
+  # reversible  -> keystore persists orig<->pseudonym crosswalk + salts + date offsets
+  # irreversible-> salts generated per-run and discarded; no keystore written
+
+# --- pseudonymisation settings ------------------------------------------------
+pseudonym:
+  id_method: salted_sha256         # for MRN / case / visit / national-id (H action)
+  salt_source: keystore            # secret salt; never committed
+  hash_truncate: 16                # hex chars kept in the emitted pseudonym
+  name_style: race_neutral_token   # e.g. "PATIENT_7F3A" rather than a fake real name
+  date_offset_days_range: [-365, 365]  # per-patient random offset, consistent per patient
+
+# --- private-tag policy -------------------------------------------------------
+private_tags:
+  policy: strip_unknown            # strip_unknown | keep_allowlisted | keep_all
+  allowlist: []                    # vendor tags proven safe are added here over time
+
+# --- pixel redaction ----------------------------------------------------------
+pixel:
+  ocr_engine: tesseract
+  auto_detect: true                # propose redaction boxes from OCR+NER
+  require_human_confirm: true      # reviewer confirms/edits boxes before write
+  fill: black
+  strip_audio: true
+
+# --- name-detection ensemble --------------------------------------------------
+names:
+  header_token_scrub: true         # PRIMARY: scrub the real PatientName tokens everywhere
+  fuzzy: true
+  gazetteer: true                  # user-supplied SG multiracial + foreigner name dictionary
+  presidio: true
+  transformer_ner:
+    enabled: true
+    model: multilingual_xlmr       # CPU-only; see docs/airgap-install.md for the model bundle

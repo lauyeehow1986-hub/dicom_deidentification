@@ -1,0 +1,39 @@
+[project]
+name = "deid-engine"
+version = "0.0.1"
+description = "DICOM/NIfTI + PHI de-identification engine (called from R via reticulate)"
+requires-python = ">=3.10"
+
+# Core: DICOM I/O incl. compressed transfer syntaxes, NIfTI, arrays, imaging.
+dependencies = [
+    "pydicom>=2.4",
+    "python-gdcm>=3.0",            # decoders for JPEG2000/JPEG-LS/RLE + valid re-encode
+    "pylibjpeg>=2.0",             # fallback/extra decoders
+    "pylibjpeg-libjpeg>=2.1",
+    "pylibjpeg-openjpeg>=2.1",    # JPEG2000
+    "pylibjpeg-rle>=2.0",
+    "numpy>=1.26",
+    "pillow>=10.0",
+    "nibabel>=5.2",               # NIfTI
+]
+
+[project.optional-dependencies]
+# Text + pixel PHI detection. Split out so the base engine can be built first.
+phi = [
+    "presidio-analyzer>=2.2",
+    "presidio-image-redactor>=0.0.53",
+    "pytesseract>=0.3.10",        # needs the Tesseract binary moved onto the box separately
+    "spacy>=3.7",
+]
+# Optional transformer NER for the strongest multilingual name recall (CPU-only).
+ner = [
+    "transformers>=4.40",
+    "torch>=2.2",                 # CPU wheel; no CUDA on the air-gapped laptop
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["deid_engine"]

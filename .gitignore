@@ -1,0 +1,48 @@
+# --- Claude / worktree tangle (this folder was previously bound to the home .git) ---
+.claude/
+
+# --- R ---
+.Rproj.user/
+.Rhistory
+.RData
+.Ruserdata
+*.Rproj
+/renv/library/
+/renv/staging/
+
+# --- Python engine (relocatable uv venv is built locally / moved onto the air-gapped box) ---
+inst/python/.venv/
+inst/python/venv/
+__pycache__/
+*.pyc
+.python-version
+
+# --- NER / OCR model weights (moved onto the air-gapped box separately; too big for git) ---
+inst/models/
+*.safetensors
+*.onnx
+*.bin
+
+# --- PHI SAFETY: never commit real or working medical data ---
+# Only synthetic, programmatically-generated fixtures under inst/testdata/synthetic/ are allowed.
+/data/
+/input/
+/output/
+*.dcm
+*.dicom
+*.nii
+*.nii.gz
+!inst/testdata/synthetic/**
+
+# --- app runtime state (keystore, manifests, audit logs live outside git) ---
+/run/
+*.sqlite
+*.sqlite3
+keystore/
+crosswalk/
+audit/
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+*.swp

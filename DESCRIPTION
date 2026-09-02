@@ -1,0 +1,31 @@
+Package: dicomdeid
+Title: DICOM/NIfTI De-Identification Shiny Application
+Version: 0.0.0.9000
+Authors@R:
+    person("Yee How", "Lau", email = "lauyeehow1986@gmail.com", role = c("aut", "cre"))
+Description: An R Shiny application for de-identifying medical images (DICOM and
+    NIfTI) and their metadata for research use, with configurable replacement
+    rules, a self-improvement tagging loop, a resumable/parallel bulk engine, and
+    a two-role quality-assurance workflow. The DICOM/PHI engine runs in a
+    relocatable Python environment via reticulate. Not for diagnosis or clinical
+    decision-making.
+License: file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Imports:
+    shiny,
+    bslib,
+    reticulate,
+    DBI,
+    RSQLite,
+    yaml,
+    jsonlite
+Suggests:
+    mirai,
+    future,
+    callr,
+    shinymanager,
+    testthat (>= 3.0.0),
+    magick
+Config/testthat/edition: 3

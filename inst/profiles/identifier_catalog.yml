@@ -1,0 +1,198 @@
+# =============================================================================
+# SingHealth direct-identifier catalog  (canonical reference for detection + QA)
+# =============================================================================
+# This file is the single source of truth that every layer measures against:
+#   - the de-identification rules engine (what to do per DICOM tag),
+#   - the free-text / pixel PHI detectors (what patterns to hunt),
+#   - the QA residual scan (what MUST be absent from outputs).
+#
+# Action codes follow DICOM PS3.15 Annex E:
+#   D = replace with a non-zero dummy / pseudonym value of the same VR
+#   Z = replace with a zero-length (empty) value
+#   X = remove the element entirely
+#   K = keep as-is
+#   C = clean  (retain the element but scrub embedded PHI from its text)
+#   U = replace UID with an internally-consistent remapped UID
+#   H = hash    (deterministic salted SHA-256 pseudonym; app-specific extension of D)
+#   S = shift   (date/time shifted by a per-patient offset that preserves intervals)
+#
+# `dates_relaxable: true` at the profile level lets dates be S (shifted) or K (kept)
+# instead of X, per study-team policy.
+# -----------------------------------------------------------------------------
+
+version: 1
+notes: >
+  Cardiovascular scope: echo (US multiframe/cine, colour-Doppler RGB), cardiac CT/MR
+  (3D/4D), secondary capture. Detectors must recurse into sequences (SQ) and inspect
+  private tags. Free-text and burned-in-pixel occurrences are handled by the text and
+  image detectors, not by tag rules alone.
+
+categories:
+
+  - id: names
+    label: "Names (structured + free-text)"
+    priority: critical
+    dicom_tags:
+      - "(0010,0010) PatientName"
+      - "(0008,0090) ReferringPhysicianName"
+      - "(0008,1050) PerformingPhysicianName"
+      - "(0008,1070) OperatorsName"
+      - "(0008,1048) PhysiciansOfRecord"
+      - "(0008,1060) NameOfPhysiciansReadingStudy"
+      - "(0010,2297) ResponsiblePerson"
+    action: D            # structured name tags -> pseudonym
+    freetext_action: C   # scrub the same name tokens from descriptions/comments
+    detection: [header_token_scrub, gazetteer, presidio_ner, transformer_ner]
+    replacement: pseudonym_name
+
+  - id: national_id
+    label: "National ID (NRIC / FIN / Passport)"
+    priority: critical
+    dicom_tags:
+      - "(0010,0020) PatientID"
+      - "(0010,1000) OtherPatientIDs"
+      - "(0010,1002) OtherPatientIDsSequence"   # SQ -> recurse
+    action: H
+    freetext_action: C
+    detection: [nric_fin_checksum, passport_regex, presidio_ner]
+    replacement: salted_sha256
+
+  - id: telephone
+    label: "Telephone / Mobile numbers"
+    priority: high
+    dicom_tags:
+      - "(0010,2154) PatientTelephoneNumbers"
+    action: X
+    freetext_action: C
+    detection: [sg_phone_regex, presidio_ner]
+
+  - id: email
+    label: "Email addresses"
+    priority: high
+    dicom_tags: []
+    action: X
+    freetext_action: C
+    detection: [email_regex, presidio_ner]
+
+  - id: biometrics
+    label: "Biometrics (full-face photo, video clips, voice)"
+    priority: critical
+    dicom_tags:
+      - "(5400,0100) WaveformSequence"          # audio/voice waveforms -> remove
+      - "(0018,1150) AudioSampleData (vendor/private variants)"
+    action: X
+    pixel_action: redact          # burned-in faces / SC photos -> pixel pipeline
+    face_action: deface_optional  # 3D head-inclusive CT/MR -> optional pydeface
+    detection: [pixel_face_detect, waveform_present]
+
+  - id: case_number
+    label: "Case numbers"
+    priority: critical
+    dicom_tags:
+      - "(0008,0050) AccessionNumber"
+    action: H          # salted SHA-256, deterministic & consistent across a run
+    freetext_action: C
+    replacement: salted_sha256
+
+  - id: visit_encounter
+    label: "Visit / Encounter IDs"
+    priority: high
+    dicom_tags:
+      - "(0038,0010) AdmissionID"
+      - "(0038,0011) IssuerOfAdmissionID"
+      - "(0038,0300) CurrentPatientLocation"
+    action: H
+    freetext_action: C
+
+  - id: mrn
+    label: "Medical Record Number (MRN)"
+    priority: critical
+    dicom_tags:
+      - "(0010,0020) PatientID"    # frequently the MRN; linkage key lives in keystore
+    action: H
+    freetext_action: C
+    replacement: salted_sha256
+    linkage: true                  # reversible mode stores orig<->pseudonym here
+
+  - id: financial
+    label: "Account / financial / insurance IDs"
+    priority: high
+    dicom_tags: []                 # usually private tags or free-text
+    action: X
+    freetext_action: C
+    detection: [private_tag_scan, presidio_ner]
+
+  - id: device_serial
+    label: "Device identifiers & serial numbers"
+    priority: medium
+    dicom_tags:
+      - "(0018,1000) DeviceSerialNumber"
+      - "(0018,1002) DeviceUID"
+      - "(0018,100B) ManufacturerDeviceClassUID"
+      - "(0020,4000) ImageComments (may carry serials)"
+    action: X
+    note: "Keep model/manufacturer for research; remove per-unit serials tracked to a patient."
+
+  - id: cert_license
+    label: "Certificate / licence numbers"
+    priority: medium
+    dicom_tags: []
+    action: X
+    freetext_action: C
+    detection: [private_tag_scan, presidio_ner]
+
+  - id: postal_code
+    label: "Postal / ZIP codes (geo < region)"
+    priority: high
+    dicom_tags:
+      - "(0010,1040) PatientAddress"
+      - "(0010,2152) RegionOfResidence"
+    action: X
+    freetext_action: C
+    detection: [sg_postal_regex]
+
+  - id: street_address
+    label: "Street addresses"
+    priority: high
+    dicom_tags:
+      - "(0010,1040) PatientAddress"
+    action: X
+    freetext_action: C
+    detection: [presidio_ner]
+
+  - id: death_dates
+    label: "Dates of death"
+    priority: high
+    dicom_tags: []                 # often free-text; no single standard tag
+    action: X
+    freetext_action: C
+
+  - id: linked_dates
+    label: "Individual-linked dates (admission/discharge/birth/etc.)"
+    priority: high
+    relaxable: true                # profile may S (shift) or K (keep)
+    dicom_tags:
+      - "(0008,0020) StudyDate"
+      - "(0008,0021) SeriesDate"
+      - "(0008,0022) AcquisitionDate"
+      - "(0008,0023) ContentDate"
+      - "(0008,0030) StudyTime"
+      - "(0010,0030) PatientBirthDate"
+      - "(0038,0020) AdmittingDate"
+      - "(0038,0021) AdmittingTime"
+    action: S                      # default: shift preserving per-patient intervals
+    replacement: patient_date_offset
+
+# ---------------------------------------------------------------------------
+# Referential-integrity handling (not a "direct identifier" but must be remapped
+# so de-identified studies stay internally consistent and viewable).
+# ---------------------------------------------------------------------------
+uid_remap:
+  action: U
+  tags:
+    - "(0008,0018) SOPInstanceUID"
+    - "(0020,000D) StudyInstanceUID"
+    - "(0020,000E) SeriesInstanceUID"
+    - "(0020,0052) FrameOfReferenceUID"
+    - "(0008,1155) ReferencedSOPInstanceUID"
+  method: deterministic_remap      # same original UID -> same new UID within a run
