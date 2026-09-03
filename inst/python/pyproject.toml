@@ -14,6 +14,7 @@ dependencies = [
     "pylibjpeg-rle>=2.0",
     "numpy>=1.26",
     "pillow>=10.0",
+    "pypdfium2>=4.30",            # render embedded-PDF pages for OCR-redaction
     "nibabel>=5.2",               # NIfTI
     "cryptography>=42.0",         # encrypted keystore (scrypt KDF + AEAD)
 ]
