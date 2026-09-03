@@ -60,3 +60,59 @@ def test_rasterize_mode_leaves_document_for_study_step():
     core.deidentify_dataset(ds, _profile("rasterize_redact"), salt=b"0" * 16)
     # dataset step must NOT delete it; the study step redacts it later.
     assert "EncapsulatedDocument" in ds
+
+
+from deid_engine import documents
+
+
+def _write(ds, path):
+    pydicom.dcmwrite(str(path), ds, enforce_file_format=True)
+
+
+def test_study_remove_mode_output_has_no_pdf(tmp_path):
+    _write(_encaps_ds(), tmp_path / "in.dcm")
+    ks = keystore.ephemeral()
+    prof = _profile("remove")
+    core.deidentify_study(str(tmp_path / "in.dcm"), str(tmp_path / "out.dcm"), prof, ks)
+    out = pydicom.dcmread(str(tmp_path / "out.dcm"))
+    assert "EncapsulatedDocument" not in out
+    assert str(out.PatientIdentityRemoved) == "YES"
+
+
+def test_study_rasterize_mode_flattens_pdf(tmp_path):
+    from deid_engine import pixels
+    ok, _ = pixels._ocr_available()
+    ks = keystore.ephemeral()
+    prof = _profile("rasterize_redact")
+    _write(_encaps_ds(), tmp_path / "in.dcm")
+    core.deidentify_study(str(tmp_path / "in.dcm"), str(tmp_path / "out.dcm"), prof, ks)
+    out = pydicom.dcmread(str(tmp_path / "out.dcm"))
+    assert str(out.PatientIdentityRemoved) == "YES"
+    if ok:
+        # redacted + flattened: still present, but no recoverable text layer
+        assert "EncapsulatedDocument" in out
+        assert documents.pdf_text(bytes(out.EncapsulatedDocument)).strip() == ""
+    else:
+        # no Tesseract -> fell back to removal
+        assert "EncapsulatedDocument" not in out
+
+
+def test_study_rasterize_success_branch_monkeypatched(tmp_path, monkeypatch):
+    from deid_engine import pixels
+    monkeypatch.setattr(pixels, "_ocr_available", lambda: (True, ""))
+    import pytesseract
+    fake = {"text": ["Tan"], "left": [10], "top": [45], "width": [120], "height": [30]}
+    monkeypatch.setattr(pytesseract, "image_to_data", lambda *a, **k: fake)
+    _write(_encaps_ds(), tmp_path / "in.dcm")
+    report = core.deidentify_study(str(tmp_path / "in.dcm"), str(tmp_path / "out.dcm"),
+                                   _profile("rasterize_redact"), keystore.ephemeral())
+    # the study actually invoked PDF redaction (these counts only exist if the block ran)
+    counts = report["files"][0]["counts"]
+    assert counts["encapsulated_pdf"] == "rasterize_redact"
+    assert counts["encapsulated_pdf_boxes"] == 1
+    out = pydicom.dcmread(str(tmp_path / "out.dcm"))          # reloads => valid DICOM
+    assert str(out.PatientIdentityRemoved) == "YES"
+    assert "EncapsulatedDocument" in out
+    assert documents.pdf_text(bytes(out.EncapsulatedDocument)).strip() == ""
+    # the DICOM-level identifiers were still de-identified
+    assert "Tan" not in str(out.get("PatientName", "")).replace("^", " ")

@@ -31,6 +31,7 @@ from . import keystore as _keystore
 from . import signing as _signing
 from . import textscan as _textscan
 from . import pixels as _pixels
+from . import documents as _documents
 from . import workspace as _workspace
 from .actions import DeidContext, apply_action
 
@@ -379,9 +380,13 @@ def deidentify_study(input_path: str, output_path: str, profile: dict, keystore)
             continue
 
         # Capture the study's real identifiers BEFORE metadata de-id mutates them,
-        # so unattended pixel OCR can seed on the true name/ID tokens.
-        known_for_pixels = (_collect_known_values(ds)
-                            if _pixel_autoredact_enabled(profile) else None)
+        # so unattended pixel OCR (and PDF OCR-redaction) can seed on the true
+        # name/ID tokens.
+        _need_original = (_pixel_autoredact_enabled(profile)
+                          or (profile.get("encapsulated_pdf") or {}).get("mode")
+                          == "rasterize_redact")
+        known_original = _collect_known_values(ds) if _need_original else None
+        known_for_pixels = known_original if _pixel_autoredact_enabled(profile) else None
 
         report = deidentify_dataset(ds, profile, salt, scanner=scanner)
         _record_crosswalk(keystore, report["records"])
@@ -404,6 +409,23 @@ def deidentify_study(input_path: str, output_path: str, profile: dict, keystore)
                     counts["pixel_ocr_note"] = res["note"]
             except Exception as e:  # noqa: BLE001 - pixel step must not lose the file
                 counts["pixel_redact_error"] = str(e)
+
+        # Opt-in encapsulated-PDF redaction: rasterize + OCR-redact + flatten, or
+        # (Tesseract absent) fall back to removal. Seed the scanner on the study's
+        # ORIGINAL identifiers so the patient's real name is caught in the PDF.
+        pdf_mode = (profile.get("encapsulated_pdf") or {}).get("mode", "remove")
+        if pdf_mode == "rasterize_redact" and _documents.is_encapsulated_pdf(ds):
+            try:
+                pscanner = _build_scanner(td, known_original or [])
+                pdpi = int((profile.get("encapsulated_pdf") or {}).get("dpi", 150))
+                res = _documents.redact_encapsulated_pdf(ds, pscanner, dpi=pdpi)
+                counts["encapsulated_pdf"] = res.get("mode")
+                if res.get("boxes") is not None:
+                    counts["encapsulated_pdf_boxes"] = res["boxes"]
+                if res.get("note"):
+                    counts["encapsulated_pdf_note"] = res["note"]
+            except Exception as e:  # noqa: BLE001 - never lose the file over the PDF
+                counts["encapsulated_pdf_error"] = str(e)
 
         # keep file-meta consistent so the output stays a valid, viewable object
         if getattr(ds, "file_meta", None) is not None and "SOPInstanceUID" in ds:
