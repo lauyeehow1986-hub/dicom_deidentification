@@ -44,6 +44,7 @@ from .signing import (
 )
 from . import corpus    # Phase 7 (synthetic acceptance corpus)
 from .corpus import build_corpus, check_survivors
+from . import documents  # noqa: F401  (Phase 8/9 encapsulated-PDF rasterize+redact)
 
 __all__ = [
     "ACTION_CODES",
@@ -72,4 +73,5 @@ __all__ = [
     "corpus",
     "build_corpus",
     "check_survivors",
+    "documents",
 ]

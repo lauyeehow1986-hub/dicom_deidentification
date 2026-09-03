@@ -150,7 +150,8 @@ acceptance_run <- function(work_dir = tempfile("acc_"),
   rep <- engine_deid_run(corpus_dir, out_dir, profile_id = profile_id,
                          keystore_path = ks_path, passphrase = passphrase,
                          reversible = (mode == "reversible"),
-                         autoredact_pixels = TRUE)
+                         autoredact_pixels = TRUE,
+                         pdf_mode = "rasterize_redact")
   outputs <- Filter(nzchar, vapply(rep$files, function(f) f$output %||% "",
                                    character(1)))
 

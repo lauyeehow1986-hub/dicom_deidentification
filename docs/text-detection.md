@@ -56,10 +56,12 @@ optional models load a single time even for a large batch.
 
 ## Encapsulated documents
 
-Embedded PDF/CDA (`EncapsulatedDocument`, `0042,0011`) can't be text-scrubbed in
-place without a bundled PDF text layer, so the default profile **removes** it
-outright (catalog id `encapsulated_documents`). `DocumentTitle` is a text VR and is
-scrubbed by the scanner. Extract-scrub-re-embed is left to a later phase.
+Embedded PDF/CDA (`EncapsulatedDocument`, `0042,0011`) isn't scrubbed by this
+in-place text scanner, so the default profile **removes** it outright (catalog id
+`encapsulated_documents`). `DocumentTitle` is a text VR and is scrubbed by the
+scanner. An opt-in `encapsulated_pdf.mode: rasterize_redact` profile setting
+instead renders, OCR-redacts and flattens the embedded PDF — see
+[docs/encapsulated-pdf.md](encapsulated-pdf.md).
 
 ## Air-gap runtime models
 

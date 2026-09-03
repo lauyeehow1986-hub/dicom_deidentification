@@ -31,7 +31,8 @@ Build the relocatable venv on the connected machine and copy it into the bundle:
 
 ```powershell
 pwsh inst/python/build_venv.ps1 -Phi -Ner     # base + Presidio/OCR + transformer NER
-# produces inst/python/.venv  (relocatable)
+# produces inst/python/.venv  (relocatable) — now also stages pypdfium2
+# (Apache-2.0/BSD-3, self-contained wheel) for encapsulated-PDF rasterize+redact
 ```
 
 Then place, inside the distributed folder:
@@ -43,7 +44,10 @@ Then place, inside the distributed folder:
   [text-detection.md](text-detection.md).
 - a **spaCy model** installed into the venv (e.g. `en_core_web_lg`) so the Presidio layer
   can build; without it, Presidio is skipped and the deterministic layers carry text detection.
-- the **Tesseract OCR binary** (needed by `presidio-image-redactor`) — a portable copy, no admin
+- the **Tesseract OCR binary** (needed by `presidio-image-redactor`, and by the
+  `encapsulated_pdf.mode: rasterize_redact` PDF path) — a portable copy, no admin.
+  Without it, `rasterize_redact` degrades to removing the embedded PDF — see
+  [encapsulated-pdf.md](encapsulated-pdf.md).
 
 ### Wiring R -> Python on the target
 `engine_bridge.R` finds the venv via the `DICOMDEID_VENV` environment variable (default
