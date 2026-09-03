@@ -29,10 +29,25 @@ bulk_effective_workers <- function(workers, keystore_path = NULL) {
 }
 
 #' Single-file de-id used by bulk workers: wraps the engine and returns its
-#' report (the manifest reads `residual_count` from it, when present).
+#' report, flattening the per-file before/after checksums and signature id to the
+#' top level so the manifest/processing log can record them.
 bulk_deid_file <- function(input_path, output_path, profile_id = "default",
-                           keystore_path = NULL, passphrase = NULL) {
-  engine_deid_run(input_path, output_path, profile_id, keystore_path, passphrase)
+                           keystore_path = NULL, passphrase = NULL,
+                           reversible = TRUE, sign_key_path = NULL,
+                           signer = NULL, project_id = NULL) {
+  rep <- engine_deid_run(input_path, output_path, profile_id, keystore_path,
+                         passphrase, reversible = reversible,
+                         sign_key_path = sign_key_path, signer = signer,
+                         project_id = project_id)
+  files <- rep$files %||% list()
+  done <- Filter(function(x) !is.null(x$output), files)
+  if (length(done)) {
+    f <- done[[1]]
+    rep$input_sha256  <- f$input_sha256 %||% NA
+    rep$output_sha256 <- f$output_sha256 %||% NA
+    rep$signature_id  <- (f$signature %||% list())$sha256 %||% NA
+  }
+  rep
 }
 
 #' Run a batch to completion. Resumable and idempotent: stale `in_progress`
@@ -52,7 +67,10 @@ bulk_deid_file <- function(input_path, output_path, profile_id = "default",
 run_batch <- function(manifest_path, batch_id = NULL, workers = 1L,
                       keystore_path = NULL, passphrase = NULL,
                       deid_fn = NULL, r_source_dir = "R",
-                      venv = engine_venv_path(), on_progress = NULL) {
+                      venv = engine_venv_path(), on_progress = NULL,
+                      root_in = NULL, root_out = NULL, reversible = TRUE,
+                      sign_key_path = NULL, signer = NULL, project_id = NULL,
+                      processed_log = NULL) {
   con <- manifest_open(manifest_path)
   on.exit(manifest_close(con), add = TRUE)
   reset_stale(con, batch_id)
@@ -64,12 +82,17 @@ run_batch <- function(manifest_path, batch_id = NULL, workers = 1L,
     message("Reversible batch -> running single-worker to keep the keystore consistent.")
   workers <- eff
 
-  # Serial path: tests inject a fake fn; real serial runs use the engine here.
+  # Serial path: tests inject a fake fn; real serial runs bind the project's
+  # reversibility/signing into the engine adapter.
   if (!is.null(deid_fn) || workers <= 1L) {
-    fn <- deid_fn %||% bulk_deid_file
+    fn <- deid_fn %||% function(input, output, pid, ks, pw)
+      bulk_deid_file(input, output, pid, ks, pw, reversible = reversible,
+                     sign_key_path = sign_key_path, signer = signer,
+                     project_id = project_id)
     drain(con, deid_fn = fn, worker = "w1", batch_id = batch_id,
           keystore_path = keystore_path, passphrase = passphrase,
-          on_progress = on_progress)
+          on_progress = on_progress, root_in = root_in, root_out = root_out,
+          processed_log = processed_log)
     return(progress_summary(con, batch_id))
   }
 
@@ -86,10 +109,16 @@ run_batch <- function(manifest_path, batch_id = NULL, workers = 1L,
       for (f in list.files(SRC, pattern = "\\.R$", full.names = TRUE)) source(f)
       con <- manifest_open(MP)
       on.exit(manifest_close(con))
-      drain(con, deid_fn = bulk_deid_file, worker = WK, batch_id = BID,
-            keystore_path = KS, passphrase = PW)
+      fn <- function(input, output, pid, ks, pw)
+        bulk_deid_file(input, output, pid, ks, pw, reversible = REV,
+                       sign_key_path = SK, signer = SGN, project_id = PID)
+      drain(con, deid_fn = fn, worker = WK, batch_id = BID,
+            keystore_path = KS, passphrase = PW,
+            root_in = RI, root_out = RO, processed_log = LG)
     }, SRC = src, MP = manifest_path, WK = sprintf("w%d", i), BID = batch_id,
-       KS = keystore_path, PW = passphrase, VENV = venv)
+       KS = keystore_path, PW = passphrase, VENV = venv,
+       RI = root_in, RO = root_out, REV = reversible, SK = sign_key_path,
+       SGN = signer, PID = project_id, LG = processed_log)
   })
   lapply(tasks, mirai::call_mirai)   # block until every daemon finishes
   progress_summary(con, batch_id)

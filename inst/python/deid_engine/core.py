@@ -28,6 +28,7 @@ import yaml
 from . import rules as _rules
 from . import pseudonym as _ps
 from . import keystore as _keystore
+from . import signing as _signing
 from . import textscan as _textscan
 from . import pixels as _pixels
 from . import workspace as _workspace
@@ -328,26 +329,44 @@ def _enrich_records(records) -> list:
 
 
 def deid_run(input_path: str, output_path: str, profile_id: str = "default",
-             keystore_path: str | None = None, passphrase: str | None = None) -> dict:
+             keystore_path: str | None = None, passphrase: str | None = None,
+             reversible: bool = True, sign_key_path: str | None = None,
+             signer: str | None = None, project_id: str | None = None) -> dict:
     """High-level entry used by the R UI.
 
-    Loads the named profile, opens/creates a keystore (or an ephemeral,
-    irreversible one when no path is given), de-identifies, and returns the
-    per-file report with human-readable change records.
+    Loads the named profile, opens/creates a keystore (persisting the salt so
+    pseudonyms stay stable across runs; the crosswalk is kept only when
+    ``reversible``), de-identifies, records each output's before/after SHA-256,
+    and — when ``sign_key_path`` is given — drops an Ed25519 sidecar signature
+    next to every output. Returns the per-file report.
     """
     profile = profile_get(profile_id)
     if keystore_path:
         if os.path.exists(keystore_path):
             ks_obj = _keystore.open(keystore_path, passphrase)
         else:
-            ks_obj = _keystore.create(keystore_path, passphrase)
+            ks_obj = _keystore.create(keystore_path, passphrase, reversible=reversible)
     else:
+        # No persisted keystore: an ephemeral, irreversible salt (single run only).
         ks_obj = _keystore.ephemeral()
 
     report = deidentify_study(input_path, output_path, profile, ks_obj)
     if keystore_path:
         ks_obj.save()
-    report["reversible"] = bool(keystore_path)
+    report["reversible"] = bool(keystore_path) and bool(ks_obj.reversible)
+
+    # Integrity: before/after checksums, and an optional sidecar signature.
+    for f in report["files"]:
+        out = f.get("output")
+        if not out:
+            continue
+        f["input_sha256"] = _signing.file_sha256(f["input"])
+        f["output_sha256"] = _signing.file_sha256(out)
+        if sign_key_path:
+            f["signature"] = _signing.sign_output(
+                out, {"deid_method": _DEID_METHOD, "profile_id": profile_id,
+                      "project_id": project_id or "", "signed_by": signer or ""},
+                sign_key_path)
     return report
 
 
@@ -711,3 +730,73 @@ def scan_residual_dir(output_path: str, profile_id: str = "default",
         "summary": {"scanned": n_pass + n_fail, "passed": n_pass, "flagged": n_fail},
         "passed": n_fail == 0,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Phase 6.5 - reviewer metadata view                                          #
+# --------------------------------------------------------------------------- #
+
+def _tag_str(tagi: int) -> str:
+    return "(%04X,%04X)" % (tagi >> 16, tagi & 0xFFFF)
+
+
+def _metadata_rows(ds, depth: int = 0) -> list:
+    """Flat (tag, keyword, vr, value) rows for the reviewer, recursing exactly one
+    level into sequences. Bulk binaries (PixelData etc.) are summarised, not dumped."""
+    from pydicom.datadict import keyword_for_tag
+    rows = []
+    for tag in list(ds.keys()):
+        elem = ds[tag]
+        tagi = int(tag)
+        kw = keyword_for_tag(tagi) or _tag_str(tagi)
+        if elem.VR == "SQ":
+            n = len(elem.value)
+            rows.append({"tag": _tag_str(tagi), "tagi": tagi, "keyword": kw,
+                         "vr": "SQ", "value": f"<Sequence: {n} item(s)>",
+                         "depth": depth})
+            if depth == 0:                       # one level only
+                for item in elem.value:
+                    rows.extend(_metadata_rows(item, depth + 1))
+            continue
+        if kw == "PixelData" or elem.VR in ("OB", "OW", "OF", "OD", "UN"):
+            raw = elem.value
+            nbytes = len(raw) if isinstance(raw, (bytes, bytearray)) else 0
+            rows.append({"tag": _tag_str(tagi), "tagi": tagi, "keyword": kw,
+                         "vr": elem.VR, "value": f"<{nbytes} bytes>", "depth": depth})
+            continue
+        raw = elem.value
+        value = ("\\".join(str(x) for x in raw)
+                 if isinstance(raw, (list, tuple)) else str(raw))
+        rows.append({"tag": _tag_str(tagi), "tagi": tagi, "keyword": kw,
+                     "vr": elem.VR, "value": value, "depth": depth})
+    return rows
+
+
+def read_metadata(path: str, profile_id: str = "default",
+                  mask_flagged: bool = True, min_score: float = 0.5) -> dict:
+    """Return a de-identified file's header as flat rows for reviewer inspection.
+
+    Recurses one level into sequences. When ``mask_flagged`` is set, runs the
+    residual scan and masks any metadata value that survived as PHI (scored
+    >= ``min_score``), so the review screen locates a leak without re-disclosing it.
+    """
+    import pydicom
+    ds = pydicom.dcmread(path)
+    rows = _metadata_rows(ds)
+
+    flagged_tags: set[int] = set()
+    if mask_flagged:
+        try:
+            res = scan_residual(path, profile_id, scan_pixels=False, min_score=min_score)
+            flagged_tags = {f["tag"] for f in res["findings"]
+                            if f.get("tag") is not None and f["score"] >= min_score}
+        except Exception:  # noqa: BLE001 - a scan hiccup must not break the view
+            flagged_tags = set()
+
+    for r in rows:
+        r["flagged"] = r["tagi"] in flagged_tags
+        if r["flagged"]:
+            r["value"] = _mask_preview(r["value"])
+        r.pop("tagi", None)
+
+    return {"path": path, "rows": rows, "masked": bool(mask_flagged)}

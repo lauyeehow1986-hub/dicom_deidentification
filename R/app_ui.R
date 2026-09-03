@@ -9,6 +9,7 @@ app_ui <- function() {
     theme = bslib::bs_theme(version = 5, preset = "cosmo"),
     header = disclaimer_banner(),
 
+    bslib::nav_panel("Projects",     mod_projects_ui("projects")),
     bslib::nav_panel("Interactive",  mod_interactive_ui("interactive")),
     bslib::nav_panel("Pixels",       mod_pixels_ui("pixels")),
     bslib::nav_panel("Rules & Profiles", mod_rules_editor_ui("rules")),

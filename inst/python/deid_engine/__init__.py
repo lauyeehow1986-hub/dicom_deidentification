@@ -31,6 +31,14 @@ from .core import (
     tag_capture,         # Phase 4 (tag-a-miss self-improvement)
     ner_export_examples, # Phase 4 (NER fine-tuning hook, stub)
     scan_residual,       # Phase 6
+    scan_residual_dir,   # Phase 6
+    read_metadata,       # Phase 6.5 (reviewer metadata view)
+)
+from .signing import (
+    file_sha256,         # Phase 6.5 (integrity checksum)
+    ensure_keypair,      # Phase 6.5 (Ed25519 sidecar signing)
+    sign_output,
+    verify_output,
 )
 
 __all__ = [
@@ -49,4 +57,10 @@ __all__ = [
     "tag_capture",
     "ner_export_examples",
     "scan_residual",
+    "scan_residual_dir",
+    "read_metadata",
+    "file_sha256",
+    "ensure_keypair",
+    "sign_output",
+    "verify_output",
 ]

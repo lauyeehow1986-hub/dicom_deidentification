@@ -53,14 +53,21 @@ class Keystore:
         return entry["original"] if entry else None
 
     def save(self) -> None:
-        """Encrypt and write the store (no-op for irreversible/ephemeral stores)."""
-        if not self._reversible or not self.path:
+        """Encrypt and write the store.
+
+        No-op for an ephemeral (path-less) store. A persisted store ALWAYS keeps
+        its salt so pseudonyms stay stable across runs; the orig<->pseudonym
+        crosswalk is written only in reversible mode.
+        """
+        if not self.path:
             return
         kdf_salt = os.urandom(16)
         key = _derive_key(self._passphrase, kdf_salt)
         nonce = os.urandom(12)
+        crosswalk = self._crosswalk if self._reversible else {}
         payload = json.dumps(
-            {"salt": self._salt.hex(), "crosswalk": self._crosswalk}
+            {"salt": self._salt.hex(), "reversible": self._reversible,
+             "crosswalk": crosswalk}
         ).encode("utf-8")
         ct = AESGCM(key).encrypt(nonce, payload, None)
         envelope = {
@@ -71,9 +78,14 @@ class Keystore:
             json.dump(envelope, fh)
 
 
-def create(path: str, passphrase: str) -> Keystore:
-    """Create a new reversible keystore with a fresh random salt and persist it."""
-    k = Keystore(path, os.urandom(32), {}, passphrase, reversible=True)
+def create(path: str, passphrase: str, reversible: bool = True) -> Keystore:
+    """Create a new keystore with a fresh random salt and persist it.
+
+    ``reversible=True`` (default) keeps the encrypted crosswalk for authorised
+    re-identification; ``reversible=False`` persists only the salt (stable hashes
+    over time) and never records a mapping.
+    """
+    k = Keystore(path, os.urandom(32), {}, passphrase, reversible=reversible)
     k.save()
     return k
 
@@ -87,8 +99,10 @@ def open(path: str, passphrase: str) -> Keystore:  # noqa: A001 (shadow builtin 
         bytes.fromhex(envelope["nonce"]), bytes.fromhex(envelope["ciphertext"]), None
     )
     data = json.loads(plaintext)
-    return Keystore(path, bytes.fromhex(data["salt"]), data["crosswalk"],
-                    passphrase, reversible=True)
+    # Pre-6.5 envelopes have no "reversible" flag; they were always reversible.
+    reversible = bool(data.get("reversible", True))
+    return Keystore(path, bytes.fromhex(data["salt"]), data.get("crosswalk", {}),
+                    passphrase, reversible=reversible)
 
 
 def ephemeral() -> Keystore:

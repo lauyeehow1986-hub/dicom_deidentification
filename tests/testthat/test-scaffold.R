@@ -66,6 +66,10 @@ test_that("Phase 6 QA + audit module UIs and identity control build without erro
   expect_error(identity_control(), NA)
 })
 
+test_that("Phase 6.5 Projects module UI builds without error", {
+  expect_error(mod_projects_ui("projects"), NA)
+})
+
 test_that("top-level UI builds without error", {
   expect_error(app_ui(), NA)
 })

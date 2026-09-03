@@ -53,6 +53,22 @@ mod_qa_ui <- function(id) {
           shiny::span(class = "small text-muted", "(previews masked)"))),
         bslib::card_body(shiny::tableOutput(ns("findings")))
       )
+    ),
+    bslib::layout_columns(
+      col_widths = c(5, 7),
+      bslib::card(
+        bslib::card_header("Signatures"),
+        bslib::card_body(shiny::tableOutput(ns("signatures")))
+      ),
+      bslib::card(
+        bslib::card_header("De-identified metadata"),
+        bslib::card_body(
+          shiny::selectInput(ns("meta_file"), "File", choices = character(0),
+                             width = "100%"),
+          shiny::checkboxInput(ns("mask"), "Mask any flagged values", value = TRUE),
+          shiny::tableOutput(ns("metadata"))
+        )
+      )
     )
   )
 }
@@ -250,6 +266,48 @@ mod_qa_server <- function(id, app_state) {
       fd <- qa_findings_df(res$results)
       shiny::validate(shiny::need(nrow(fd) > 0, "No residual findings \u2014 clean."))
       fd
+    }, striped = TRUE, spacing = "xs", width = "100%")
+
+    # --- signatures + metadata review -------------------------------------
+    scanned_paths <- shiny::reactive({
+      res <- rv$res
+      if (is.null(res)) character(0)
+      else vapply(res$results, function(r) r$path %||% "", character(1))
+    })
+
+    shiny::observeEvent(rv$res, {
+      paths <- scanned_paths()
+      shiny::updateSelectInput(session, "meta_file",
+        choices = stats::setNames(paths, basename(paths)),
+        selected = if (length(paths)) paths[1] else NULL)
+    })
+
+    output$signatures <- shiny::renderTable({
+      paths <- scanned_paths()
+      shiny::validate(shiny::need(length(paths) > 0, "Run a scan to list outputs."))
+      p <- app_state$project_obj
+      shiny::validate(shiny::need(!is.null(p), "Select a project (Projects tab) to verify signatures."))
+      sg <- project_resolve_signing(p)
+      shiny::validate(shiny::need(isTRUE(sg$enabled), "Signing is off for this project."))
+      shiny::validate(shiny::need(isTRUE(app_state$engine$available), "Engine not configured."))
+      kp <- tryCatch(engine_ensure_keypair(sg$key_dir), error = function(e) NULL)
+      shiny::validate(shiny::need(!is.null(kp), "No signing key available."))
+      signature_status_df(paths, pub_path = kp$pub_path,
+                          verify_fn = function(out, pub) engine_verify_output(out, pub))
+    }, striped = TRUE, spacing = "xs", width = "100%")
+
+    output$metadata <- shiny::renderTable({
+      f <- input$meta_file
+      shiny::validate(shiny::need(!is.null(f) && nzchar(f), "Pick a file."))
+      shiny::validate(shiny::need(isTRUE(app_state$engine$available), "Engine not configured."))
+      md <- tryCatch(engine_read_metadata(f, profile_id = input$profile %||% "default",
+                                          mask_flagged = isTRUE(input$mask)),
+                     error = function(e) NULL)
+      shiny::validate(shiny::need(!is.null(md), "Could not read metadata."))
+      do.call(rbind, lapply(md$rows, function(r) data.frame(
+        Tag = r$tag %||% "", Keyword = r$keyword %||% "", VR = r$vr %||% "",
+        Value = trunc_str(as.character(r$value %||% ""), 80),
+        Flagged = if (isTRUE(r$flagged)) "yes" else "", stringsAsFactors = FALSE)))
     }, striped = TRUE, spacing = "xs", width = "100%")
   })
 }

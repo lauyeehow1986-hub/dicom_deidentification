@@ -15,8 +15,14 @@ audit_dir <- function() {
   d
 }
 
-#' Path to the audit log (one JSON object per line).
-audit_file <- function() file.path(audit_dir(), "audit_log.jsonl")
+#' Path to the audit log (one JSON object per line). With a `project_id` the log
+#' lives inside that project's bundle, so each project keeps its own hash chain
+#' and the audit travels with the portable project folder.
+audit_file <- function(project_id = NULL) {
+  if (!is.null(project_id) && nzchar(project_id))
+    file.path(project_dir(project_id), "audit_log.jsonl")
+  else file.path(audit_dir(), "audit_log.jsonl")
+}
 
 # Field separator for the canonical hash payload: a control char (U+001F, unit
 # separator) that cannot appear in the JSON-escaped field values, so the payload

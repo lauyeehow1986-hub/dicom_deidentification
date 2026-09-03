@@ -12,7 +12,8 @@ running acceptance test from Phase 1 onward.
 | **4** | Profiles & self-improvement | Rules/profile editor + per-project profiles (writable workspace overrides shipped defaults); tag-a-miss capture -> project gazetteer/custom-regex + labeled-example store; NER fine-tuning export hook. See [docs/profiles-self-improvement.md](profiles-self-improvement.md). **(done)** |
 | **5** | Bulk engine | SQLite manifest job queue; mirai/future parallel workers; resumable/checkpointed; ~2 TB streaming; progress dashboard. See [docs/bulk-engine.md](bulk-engine.md). **(done)** |
 | **6** | QA & governance | Automated residual-PHI scan on outputs; sampling review; pass/fail report; two-role auth (de-identifier -> reviewer) with gated sign-off + audit log. See [docs/qa-governance.md](qa-governance.md). **(done)** |
-| **7** | Packaging & air-gap | Reproducible bundle (R library + relocatable venv + NER model + optional dcmtk); offline install doc; synthetic acceptance corpus; validation. |
+| **6.5** | Projects, integrity & signing | Portable project bundles (copyable settings, rebindable roots); global vs project-scoped hashing (persisted salt, reversible/irreversible); disk-swap-safe resume; before/after checksums + processing log; Ed25519 sidecar signatures; reviewer metadata view; per-project audit log. See [docs/projects-integrity-signing.md](projects-integrity-signing.md). **(done)** |
+| **7** | Packaging & air-gap | Reproducible bundle (R library + relocatable venv + NER model + optional dcmtk + **global keystore & signing keys**); offline install doc; synthetic acceptance corpus; validation. |
 
 ## Cross-cutting invariants
 - Output is **valid, viewable DICOM** (NIfTI out for NIfTI in).

@@ -53,8 +53,30 @@ call_engine <- function(fn, ...) {
 #'   creating or opening an encrypted keystore protected by `passphrase`.
 #' @return the engine report (per-file records + counts) as an R list.
 engine_deid_run <- function(input_path, output_path, profile_id = "default",
-                            keystore_path = NULL, passphrase = NULL) {
-  call_engine("deid_run", input_path, output_path, profile_id, keystore_path, passphrase)
+                            keystore_path = NULL, passphrase = NULL,
+                            reversible = TRUE, sign_key_path = NULL,
+                            signer = NULL, project_id = NULL) {
+  call_engine("deid_run", input_path, output_path, profile_id, keystore_path,
+              passphrase, reversible, sign_key_path, signer, project_id)
+}
+
+#' Phase 6.5 integrity + signing + metadata bridges.
+
+#' Streaming SHA-256 of a file (before/after de-id integrity).
+engine_file_sha256 <- function(path) call_engine("file_sha256", path)
+
+#' Ensure an Ed25519 signing keypair exists under `dir`; returns key/pub paths.
+engine_ensure_keypair <- function(dir) call_engine("ensure_keypair", dir)
+
+#' Verify an output's detached signature; returns list(ok, reason).
+engine_verify_output <- function(output_path, pub_path) {
+  call_engine("verify_output", output_path, pub_path)
+}
+
+#' The de-identified header as reviewer rows (masking any residual-flagged value).
+engine_read_metadata <- function(path, profile_id = "default",
+                                 mask_flagged = TRUE, min_score = 0.5) {
+  call_engine("read_metadata", path, profile_id, mask_flagged, min_score)
 }
 
 #' Phase 3 pixel entries (burned-in PHI viewer + redaction).

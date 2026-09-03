@@ -12,6 +12,15 @@ mod_bulk_ui <- function(id) {
   bslib::layout_sidebar(
     sidebar = bslib::sidebar(
       width = 380,
+      shiny::selectInput(ns("project"), "Project (its hashing/signing/roots)",
+                         choices = c("(none)" = "")),
+      shiny::conditionalPanel(
+        condition = sprintf("input['%s'] != ''", ns("project")),
+        shiny::passwordInput(ns("proj_pass"), "Keystore passphrase"),
+        shiny::p(class = "small text-muted",
+                 "Roots, profile, hashing scope, reversibility and signing come "
+                 , "from the project. Rebind roots in the Projects tab after a disk swap.")
+      ),
       shiny::textInput(ns("input_dir"), "Input root folder",
                        placeholder = "C:/studies/incoming"),
       shiny::textInput(ns("output_dir"), "Output root folder",
@@ -80,6 +89,25 @@ mod_bulk_server <- function(id, app_state) {
                                selected = app_state$profile_id %||% ids[1])
     })
 
+    # Offer projects; selecting one prefills roots/profile/reversibility from it.
+    shiny::observe({
+      app_state$project
+      pids <- vapply(projects_list(), function(p) p$project_id, character(1))
+      shiny::updateSelectInput(session, "project", choices = c("(none)" = "", pids),
+                               selected = app_state$project %||% "")
+    })
+    shiny::observeEvent(input$project, {
+      if (!nzchar(input$project %||% "")) return()
+      p <- tryCatch(project_get(input$project), error = function(e) NULL)
+      if (is.null(p)) return()
+      shiny::updateTextInput(session, "input_dir", value = p$roots[["in"]] %||% "")
+      shiny::updateTextInput(session, "output_dir", value = p$roots[["out"]] %||% "")
+      shiny::updateTextInput(session, "batch_id", value = p$project_id)
+      shiny::updateSelectInput(session, "profile", selected = p$profile_id %||% "default")
+      shiny::updateCheckboxInput(session, "reversible",
+                                 value = isTRUE(p$hashing$reversible))
+    }, ignoreInit = TRUE)
+
     # Read the current manifest state into the reactive values feeding the UI.
     refresh_progress <- function() {
       if (is.null(rv$mpath) || !file.exists(rv$mpath)) return(invisible())
@@ -124,13 +152,38 @@ mod_bulk_server <- function(id, app_state) {
         shiny::showNotification("Python engine not configured \u2014 see docs/airgap-install.md.",
                                 type = "error"); return()
       }
+      # Resolve the run's hashing/signing/roots/log \u2014 from the active project
+      # when one is selected, otherwise from the manual reversible controls.
+      proj <- if (nzchar(input$project %||% ""))
+        tryCatch(project_get(input$project), error = function(e) NULL) else NULL
       reversible <- isTRUE(input$reversible)
-      if (reversible && (!nzchar(input$keystore %||% "") || !nzchar(input$passphrase %||% ""))) {
-        shiny::showNotification("Reversible mode needs a keystore file and passphrase.",
-                                type = "error"); return()
+      ks <- NULL; pw <- NULL; sign_key <- NULL; plog <- NULL; pid <- NULL
+      root_in <- input$input_dir %||% ""; root_out <- input$output_dir %||% ""
+      signer <- app_state$user %||% NA_character_
+
+      if (!is.null(proj)) {
+        ksr <- project_resolve_keystore(proj)
+        reversible <- ksr$reversible
+        ks <- ksr$path
+        pw <- input$proj_pass %||% ""
+        if (!nzchar(pw)) {
+          shiny::showNotification("Enter the project's keystore passphrase.",
+                                  type = "error"); return()
+        }
+        pid <- proj$project_id
+        plog <- project_processed_log(pid)
+        sg <- project_resolve_signing(proj)
+        if (isTRUE(sg$enabled)) {
+          kp <- tryCatch(engine_ensure_keypair(sg$key_dir), error = function(e) NULL)
+          if (!is.null(kp)) sign_key <- kp$key_path
+        }
+      } else if (reversible) {
+        if (!nzchar(input$keystore %||% "") || !nzchar(input$passphrase %||% "")) {
+          shiny::showNotification("Reversible mode needs a keystore file and passphrase.",
+                                  type = "error"); return()
+        }
+        ks <- input$keystore; pw <- input$passphrase
       }
-      ks <- if (reversible) input$keystore else NULL
-      pw <- if (reversible) input$passphrase else NULL
       workers <- max(1L, as.integer(input$workers %||% 1L))
 
       src  <- normalizePath("R", mustWork = FALSE)
@@ -138,16 +191,22 @@ mod_bulk_server <- function(id, app_state) {
       ws   <- Sys.getenv("DICOMDEID_WORKSPACE", file.path(getwd(), "workspace"))
 
       rv$proc <- callr::r_bg(
-        func = function(mp, src, workers, batch, ks, pw, venv, ws) {
+        func = function(mp, src, workers, batch, ks, pw, venv, ws,
+                        root_in, root_out, reversible, sign_key, signer, pid, plog) {
           Sys.setenv(DICOMDEID_WORKSPACE = ws, DICOMDEID_VENV = venv,
                      KMP_DUPLICATE_LIB_OK = "TRUE")
           for (f in list.files(src, pattern = "[.]R$", full.names = TRUE)) source(f)
           run_batch(mp, batch_id = batch, workers = workers,
                     keystore_path = ks, passphrase = pw,
-                    r_source_dir = src, venv = venv)
+                    r_source_dir = src, venv = venv,
+                    root_in = root_in, root_out = root_out, reversible = reversible,
+                    sign_key_path = sign_key, signer = signer, project_id = pid,
+                    processed_log = plog)
         },
         args = list(mp = rv$mpath, src = src, workers = workers, batch = rv$batch,
-                    ks = ks, pw = pw, venv = venv, ws = ws),
+                    ks = ks, pw = pw, venv = venv, ws = ws,
+                    root_in = root_in, root_out = root_out, reversible = reversible,
+                    sign_key = sign_key, signer = signer, pid = pid, plog = plog),
         supervise = TRUE)
       rv$running <- TRUE
       rv$msg <- sprintf("Running batch '%s' with %d worker(s)\u2026", rv$batch,

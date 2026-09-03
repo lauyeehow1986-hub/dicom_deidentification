@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS files (
   batch_id      TEXT NOT NULL,
   input_path    TEXT NOT NULL,
   output_path   TEXT,
+  rel_in        TEXT,
+  rel_out       TEXT,
   status        TEXT NOT NULL DEFAULT 'pending',
   modality      TEXT,
   transfer_syntax TEXT,
@@ -21,10 +23,14 @@ CREATE TABLE IF NOT EXISTS files (
   started_at    TEXT,
   finished_at   TEXT,
   residual_count INTEGER,
+  input_sha256  TEXT,
+  output_sha256 TEXT,
   error         TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_files_status ON files(status);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_files_batch_input ON files(batch_id, input_path);
+-- Resume identity is the path RELATIVE to the project roots, so a batch keeps
+-- resuming after a portable-disk swap changes the absolute drive/mount.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_files_batch_relin ON files(batch_id, rel_in);
 CREATE TABLE IF NOT EXISTS batches (
   batch_id   TEXT PRIMARY KEY,
   profile_id TEXT,
@@ -33,6 +39,23 @@ CREATE TABLE IF NOT EXISTS batches (
   total      INTEGER
 );
 "
+
+# Columns added after the first schema shipped; ALTER them into any pre-existing
+# manifest so an in-flight batch upgrades in place.
+.MANIFEST_ADDED_COLS <- c(rel_in = "TEXT", rel_out = "TEXT",
+                          input_sha256 = "TEXT", output_sha256 = "TEXT")
+
+.manifest_migrate <- function(con) {
+  have <- DBI::dbGetQuery(con, "PRAGMA table_info(files)")$name
+  for (col in names(.MANIFEST_ADDED_COLS)) {
+    if (!(col %in% have)) {
+      DBI::dbExecute(con, sprintf("ALTER TABLE files ADD COLUMN %s %s",
+                                  col, .MANIFEST_ADDED_COLS[[col]]))
+    }
+  }
+  DBI::dbExecute(con,
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_files_batch_relin ON files(batch_id, rel_in)")
+}
 
 # File extensions we treat as processable volumes/images.
 MANIFEST_EXTS <- c("dcm", "dicom", "ima", "nii", "nii.gz")
@@ -49,8 +72,11 @@ manifest_open <- function(path = file.path("run", "manifest.sqlite")) {
   DBI::dbExecute(con, "PRAGMA synchronous=NORMAL;")
   for (stmt in strsplit(MANIFEST_SCHEMA, ";\\s*")[[1]]) {
     stmt <- trimws(stmt)
-    if (nzchar(stmt)) DBI::dbExecute(con, stmt)
+    # skip SQL comment-only fragments produced by the split
+    if (nzchar(stmt) && !all(grepl("^--", strsplit(stmt, "\n")[[1]])))
+      DBI::dbExecute(con, stmt)
   }
+  .manifest_migrate(con)
   con
 }
 
@@ -89,14 +115,15 @@ register_batch <- function(con, batch_id, root_in, root_out, files = NULL,
   if (is.null(files)) files <- manifest_scan_files(root_in)
   inserted <- 0L
   if (length(files)) {
-    out_paths <- vapply(files, function(f)
-      file.path(root_out, .rel_under(root_in, f)), character(1))
+    rels <- vapply(files, function(f) .rel_under(root_in, f), character(1))
+    out_paths <- vapply(rels, function(r) file.path(root_out, r), character(1))
     DBI::dbWithTransaction(con, {
       rs <- DBI::dbSendStatement(con,
-        "INSERT OR IGNORE INTO files (batch_id, input_path, output_path, status)
-         VALUES (?, ?, ?, 'pending')")
+        "INSERT OR IGNORE INTO files
+           (batch_id, input_path, output_path, rel_in, rel_out, status)
+         VALUES (?, ?, ?, ?, ?, 'pending')")
       DBI::dbBind(rs, list(rep(batch_id, length(files)), unname(files),
-                           unname(out_paths)))
+                           unname(out_paths), unname(rels), unname(rels)))
       inserted <- DBI::dbGetRowsAffected(rs)
       DBI::dbClearResult(rs)
     })
@@ -116,7 +143,8 @@ register_batch <- function(con, batch_id, root_in, root_out, files = NULL,
 #' Transactionally claim one pending row for `worker`. Returns the row (as a
 #' one-row list) or NULL when the queue is drained. BEGIN IMMEDIATE serialises
 #' the select-then-update so two workers never grab the same file.
-claim_next <- function(con, worker, batch_id = NULL) {
+claim_next <- function(con, worker, batch_id = NULL,
+                       root_in = NULL, root_out = NULL) {
   # A single UPDATE...RETURNING is atomic: SQLite serialises writers, so a
   # second worker running this concurrently re-evaluates the subquery and picks
   # the *next* pending row rather than re-claiming the same one.
@@ -131,13 +159,24 @@ claim_next <- function(con, worker, batch_id = NULL) {
   row <- DBI::dbGetQuery(con, paste0(
     "UPDATE files SET status='in_progress', worker=?, started_at=?
      WHERE id = (", sub, ")
-     RETURNING id, input_path, output_path, batch_id"), params = params)
-  if (nrow(row)) as.list(row) else NULL
+     RETURNING id, input_path, output_path, rel_in, rel_out, batch_id"),
+    params = params)
+  if (!nrow(row)) return(NULL)
+  row <- as.list(row)
+  # Resolve absolute paths against the CURRENT project roots, so a batch resumes
+  # correctly after a portable-disk swap changed the drive letter / mount.
+  .rel_ok <- function(x) length(x) && !is.na(x[[1]]) && nzchar(x[[1]])
+  if (!is.null(root_in) && .rel_ok(row$rel_in))
+    row$input_path <- file.path(root_in, row$rel_in)
+  if (!is.null(root_out) && .rel_ok(row$rel_out))
+    row$output_path <- file.path(root_out, row$rel_out)
+  row
 }
 
 #' Mark a claimed row finished successfully.
 mark_done <- function(con, id, output_path = NULL, residual_count = NA_integer_,
-                      modality = NULL, transfer_syntax = NULL) {
+                      modality = NULL, transfer_syntax = NULL,
+                      input_sha256 = NULL, output_sha256 = NULL) {
   rc <- if (length(residual_count)) residual_count[[1]] else NA_integer_
   status <- if (!is.na(rc) && rc > 0) "flagged" else "done"
   nn <- function(x) if (is.null(x) || !length(x)) NA else x[[1]]
@@ -145,9 +184,12 @@ mark_done <- function(con, id, output_path = NULL, residual_count = NA_integer_,
     "UPDATE files SET status=?, finished_at=?, residual_count=?,
        output_path=COALESCE(?, output_path),
        modality=COALESCE(?, modality),
-       transfer_syntax=COALESCE(?, transfer_syntax) WHERE id=?",
+       transfer_syntax=COALESCE(?, transfer_syntax),
+       input_sha256=COALESCE(?, input_sha256),
+       output_sha256=COALESCE(?, output_sha256) WHERE id=?",
     params = list(status, .now(), nn(rc), nn(output_path),
-                  nn(modality), nn(transfer_syntax), id))
+                  nn(modality), nn(transfer_syntax),
+                  nn(input_sha256), nn(output_sha256), id))
   invisible(status)
 }
 
@@ -233,10 +275,11 @@ batch_profile <- function(con, batch_id) {
 #' process. Returns the number of rows this worker processed.
 drain <- function(con, deid_fn, worker = "w1", batch_id = NULL,
                   profile_id = NULL, keystore_path = NULL,
-                  passphrase = NULL, on_progress = NULL) {
+                  passphrase = NULL, on_progress = NULL,
+                  root_in = NULL, root_out = NULL, processed_log = NULL) {
   processed <- 0L
   repeat {
-    row <- claim_next(con, worker, batch_id)
+    row <- claim_next(con, worker, batch_id, root_in = root_in, root_out = root_out)
     if (is.null(row)) break
     pid <- profile_id %||% batch_profile(con, row$batch_id)
     if (!is.null(row$output_path) && !is.na(row$output_path))
@@ -245,10 +288,25 @@ drain <- function(con, deid_fn, worker = "w1", batch_id = NULL,
       rep <- deid_fn(row$input_path, row$output_path, pid,
                      keystore_path, passphrase)
       rc <- suppressWarnings(as.integer(rep$residual_count %||% NA))
-      mark_done(con, row$id, residual_count = rc)
+      status <- mark_done(con, row$id, output_path = row$output_path,
+                          residual_count = rc,
+                          input_sha256 = rep$input_sha256 %||% NULL,
+                          output_sha256 = rep$output_sha256 %||% NULL)
+      if (!is.null(processed_log))
+        processed_log_append(processed_log, list(
+          rel_in = row$rel_in %||% NA, rel_out = row$rel_out %||% NA,
+          input_sha256 = rep$input_sha256 %||% NA,
+          output_sha256 = rep$output_sha256 %||% NA,
+          residual_count = rc, status = status,
+          signature_id = rep$signature_id %||% NA))
       TRUE
     }, error = function(e) {
-      mark_failed(con, row$id, conditionMessage(e)); FALSE
+      mark_failed(con, row$id, conditionMessage(e))
+      if (!is.null(processed_log))
+        processed_log_append(processed_log, list(
+          rel_in = row$rel_in %||% NA, status = "failed",
+          error = conditionMessage(e)))
+      FALSE
     })
     processed <- processed + 1L
     if (is.function(on_progress)) on_progress(progress_summary(con, batch_id))

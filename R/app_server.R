@@ -18,6 +18,8 @@ app_server <- function(input, output, session) {
     profile_id = "default",       # active profile the workflow tabs use
     profile    = load_profile("default"),
     profiles_version = 0L,         # bumped to refresh profile lists across tabs
+    project    = NULL,            # active project id (Phase 6.5) or NULL
+    project_obj = NULL,          # the active project descriptor (list)
     engine     = engine_handle()  # lazy; NULL-safe when the venv isn't built yet
   )
 
@@ -27,6 +29,7 @@ app_server <- function(input, output, session) {
   shiny::observeEvent(input$acting_user, app_state$user <- input$acting_user,
                       ignoreInit = TRUE)
 
+  mod_projects_server("projects", app_state)
   mod_interactive_server("interactive", app_state)
   mod_pixels_server("pixels", app_state)
   mod_rules_editor_server("rules", app_state)
