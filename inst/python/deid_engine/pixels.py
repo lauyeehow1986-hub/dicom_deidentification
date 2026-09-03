@@ -95,6 +95,21 @@ def _frame_to_uint8(frame: np.ndarray) -> np.ndarray:
     return f
 
 
+def _configure_tesseract():
+    """Point pytesseract at the bundled Tesseract when ``DICOMDEID_TESSERACT`` is
+    set to an existing binary. On Windows a bare ``tesseract`` command does not
+    resolve off PATH via subprocess, so a copy-over air-gap bundle sets this env
+    var (in its launcher) to the absolute path of ``bin/tesseract/tesseract.exe``.
+    A missing/unset pointer is a no-op, so a machine with tesseract already on
+    PATH keeps working. Returns the effective command string."""
+    import os
+    import pytesseract
+    cmd = os.environ.get("DICOMDEID_TESSERACT")
+    if cmd and os.path.isfile(cmd):
+        pytesseract.pytesseract.tesseract_cmd = cmd
+    return pytesseract.pytesseract.tesseract_cmd
+
+
 def ocr_phi_boxes(ds, scanner) -> dict:
     """Optional: OCR each frame, keep boxes whose text the scanner flags as PHI.
 
@@ -104,6 +119,7 @@ def ocr_phi_boxes(ds, scanner) -> dict:
     try:
         import pytesseract
         from pytesseract import Output
+        _configure_tesseract()
         pytesseract.get_tesseract_version()
     except Exception as e:  # noqa: BLE001 - no binary on this box / air-gap
         return {"boxes": [], "note": f"ocr unavailable: {e}"}

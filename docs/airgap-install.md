@@ -53,9 +53,45 @@ Then place, inside the distributed folder:
 DICOMDEID_VENV = <bundle>/inst/python/.venv
 ```
 
-## 3. Assemble the reproducible bundle — `tools/build_bundle.ps1`
+## 3. One-shot portable bundle — `tools/build_portable_bundle.ps1` (recommended)
 
-Once both runtimes exist (sections 1–2), stage everything into one copy-over folder and
+If you want the target to need **nothing pre-installed** (no R, no admin), one script does
+the whole composition: portable R + the app's R packages (via `shiny_alcatraz`), the
+relocatable Python engine venv, the transformer NER model, the portable Tesseract OCR
+runtime, and the Ed25519 signing keys — then wires the launcher and writes the checksum
+manifest. Build it on the connected machine, copy the folder over, double-click `run.bat`.
+
+```powershell
+# prerequisites on the connected machine (once):
+#   pwsh inst/python/build_venv.ps1 -Phi -Ner       # the relocatable engine venv
+#   inst/models/<ner-model>/                          # a local token-classification model dir
+#   vendor/tesseract/tesseract.exe                    # a portable Tesseract (UB-Mannheim, extracted)
+tools\build_portable_bundle.ps1 -Out dist\dicomdeid-portable
+# reproducible pin (locks R + CRAN package versions):
+tools\build_portable_bundle.ps1 -RVersion 4.5.1 -Snapshot 2026-09-01
+# omit the signing keys:
+tools\build_portable_bundle.ps1 -SkipSecrets
+```
+
+It stages a **clean** app tree (never `.git`, `tests/`, runtime state, or any stray real
+`.dcm`), runs `build_portable()`, copies the venv/model/Tesseract/keys under `<Out>/app`,
+strips the build-machine editable-install pointer so the venv is fully relocatable, and
+patches `run_app.R` so the engine finds everything by env var on the target
+(`DICOMDEID_VENV`, `PYTHONPATH`, `DICOMDEID_WORKSPACE`, `DICOMDEID_TESSERACT`,
+`TESSDATA_PREFIX`, offline HF). There is **no pre-made global keystore** — set its
+passphrase on the target on first run (§3.1). Sections 1–2 and 3.2 below are the pieces this
+script automates; run them by hand only if you need a non-portable bundle.
+
+### 3.1 The global keystore passphrase (set on the target)
+The bundle ships the **signing keys** but not a global keystore. On the target, the first
+reversible global-scope run asks you for a passphrase; that creates
+`workspace/keystores/global.json` (a fresh salt + the encrypted crosswalk). To keep
+pseudonyms linking **across machines**, copy that `global.json` to the other boxes and reuse
+the same passphrase — the passphrase never travels inside the bundle.
+
+### 3.2 Manual assembly (non-portable) — `tools/build_bundle.ps1`
+
+If the target already has R and the app's packages, stage the app + venv only (smaller) and
 **checksum every file** into `BUNDLE_MANIFEST.json`:
 
 ```powershell

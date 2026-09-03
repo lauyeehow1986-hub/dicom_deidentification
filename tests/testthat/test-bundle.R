@@ -27,6 +27,22 @@ test_that("bundle_manifest checksums every file, skipping caches", {
   expect_gt(row$bytes, 0)
 })
 
+test_that("bundle_manifest excludes wheel dist-info license trees (long paths)", {
+  # torch et al. ship deeply-nested third-party LICENSE texts under
+  # *.dist-info/licenses/ that blow past Windows MAX_PATH; they are inert, so
+  # the integrity manifest skips them by RELATIVE path (consistent across the
+  # build box and the target regardless of the install root's length).
+  root <- make_tree()
+  lic <- file.path(root, "inst", "python", ".venv", "Lib", "site-packages",
+                   "torch-2.13.0.dist-info", "licenses", "third_party", "x")
+  dir.create(lic, recursive = TRUE)
+  writeLines("BSD", file.path(lic, "LICENSE.txt"))
+  m <- bundle_manifest(root)
+  expect_false(any(grepl("dist-info/licenses/", m$path)))
+  # a normal engine file is still covered
+  expect_true("inst/python/core.py" %in% m$path)
+})
+
 test_that("bundle_write_manifest + bundle_verify round-trip clean", {
   root <- make_tree()
   mp <- bundle_write_manifest(root)

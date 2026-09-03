@@ -143,9 +143,14 @@ acceptance_run <- function(work_dir = tempfile("acc_"),
   man <- engine_build_corpus(corpus_dir)
   n_inputs <- length(man$fixtures)
 
+  # Auto-apply burned-in-pixel redaction for the acceptance run (simulating a
+  # reviewer confirming every OCR-proposed box), so the residual scan validates
+  # that planted pixel PHI is actually removed - not just that it would be
+  # flagged for manual review. Production keeps human confirmation by default.
   rep <- engine_deid_run(corpus_dir, out_dir, profile_id = profile_id,
                          keystore_path = ks_path, passphrase = passphrase,
-                         reversible = (mode == "reversible"))
+                         reversible = (mode == "reversible"),
+                         autoredact_pixels = TRUE)
   outputs <- Filter(nzchar, vapply(rep$files, function(f) f$output %||% "",
                                    character(1)))
 

@@ -7,8 +7,12 @@
 #' Pure R (digest) so they run on the locked-down box without the engine.
 
 # Paths never worth hashing (rebuildable caches / VCS / the manifest itself).
+# `dist-info/licenses/`: third-party LICENSE texts wheels ship in deeply nested
+# trees (torch's run to >260 chars); they are inert and blow past Windows
+# MAX_PATH, so they are skipped by RELATIVE path - consistently on the build box
+# and the target, whatever the install root's length.
 .BUNDLE_EXCLUDE <- c("__pycache__", "[.]git(/|$)", "[.]pyc$", "[.]Rproj[.]user",
-                     "BUNDLE_MANIFEST[.]json$")
+                     "[.]dist-info/licenses/", "BUNDLE_MANIFEST[.]json$")
 
 .bundle_excluded <- function(rel) {
   any(vapply(.BUNDLE_EXCLUDE, function(p) grepl(p, rel), logical(1)))
@@ -22,9 +26,12 @@ bundle_manifest <- function(dir) {
   files <- list.files(dir, recursive = TRUE, all.files = TRUE,
                       no.. = TRUE, full.names = TRUE)
   files <- files[!dir.exists(files)]  # files only
-  full <- normalizePath(files, winslash = "/")
-  rel <- substring(full, nchar(paste0(dir, "/")) + 1L)
-  keep <- !vapply(rel, .bundle_excluded, logical(1))
+  # `list.files(full.names=TRUE)` already prefixes each path with the (normalized,
+  # forward-slash) `dir`, so strip that to get the relative path WITHOUT calling
+  # normalizePath on every file - which would trip Windows MAX_PATH on the deep
+  # wheel-license trees before they can even be excluded.
+  rel <- substring(files, nchar(dir) + 2L)
+  keep <- !vapply(rel, .bundle_excluded, logical(1), USE.NAMES = FALSE)
   files <- files[keep]; rel <- rel[keep]
   ord <- order(rel)
   files <- files[ord]; rel <- rel[ord]

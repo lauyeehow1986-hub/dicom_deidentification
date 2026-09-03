@@ -157,8 +157,14 @@ def test_metadata_pass_removes_waveform_sequence():
     assert "WaveformSequence" not in ds
 
 
-def test_ocr_phi_boxes_degrades_without_tesseract():
+def test_ocr_phi_boxes_degrades_without_tesseract(monkeypatch):
+    # Force Tesseract absent so the degrade path is exercised deterministically,
+    # even on a box where a real binary is installed or DICOMDEID_TESSERACT is set.
+    import pytesseract
     from deid_engine import textscan
+    monkeypatch.delenv("DICOMDEID_TESSERACT", raising=False)
+    monkeypatch.setattr(pytesseract.pytesseract, "tesseract_cmd",
+                        "definitely-not-a-real-tesseract-binary")
     scanner = textscan.TextScanner(use_presidio=False, use_ner=False)
     res = pixels.ocr_phi_boxes(_mono(), scanner)
     assert res["boxes"] == []

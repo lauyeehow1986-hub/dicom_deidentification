@@ -177,6 +177,21 @@ def _resolve_gazetteer(gfile):
     return gfile if os.path.exists(gfile) else None
 
 
+def _resolve_ner_model(ner_model):
+    """Resolve a NER model directory: absolute as-is, else relative to inst/
+    (so profiles can ship a portable ``models/...`` path that works no matter
+    the process working directory). Returns an existing directory or None."""
+    if not ner_model:
+        return None
+    if os.path.isabs(ner_model) and os.path.isdir(ner_model):
+        return ner_model
+    inst_root = _rules.PROFILE_DIR.parent  # inst/
+    cand = os.path.join(str(inst_root), ner_model)
+    if os.path.isdir(cand):
+        return cand
+    return ner_model if os.path.isdir(ner_model) else None
+
+
 def _build_scanner(td: dict, known_values):
     """Assemble the layered TextScanner from the profile's text_detection block.
 
@@ -202,7 +217,7 @@ def _build_scanner(td: dict, known_values):
         custom_regex=td.get("custom_regex") or [],
         use_presidio=bool(td.get("use_presidio", False)),
         use_ner=bool(td.get("use_ner", False)),
-        ner_model=td.get("ner_model"))
+        ner_model=_resolve_ner_model(td.get("ner_model")))
 
 
 def deidentify_dataset(ds, profile: dict, salt: bytes, scanner=None) -> dict:
@@ -309,6 +324,20 @@ def _deidentify_nifti(full: str, out: str) -> dict:
             "records": []}
 
 
+def _pixel_autoredact_enabled(profile: dict) -> bool:
+    """True when burned-in pixel PHI should be redacted UNattended.
+
+    Only when the profile turns pixel cleaning on, keeps auto-detect, AND opts
+    out of human confirmation. The shipped default keeps ``require_human_confirm``
+    true, so a reviewer confirms boxes in the Pixels tab; a bulk profile can set
+    it false to let the pipeline paint the OCR-proposed boxes on its own."""
+    opts = profile.get("options") or {}
+    px = profile.get("pixel") or {}
+    return (bool(opts.get("clean_pixel_data"))
+            and bool(px.get("auto_detect", True))
+            and not bool(px.get("require_human_confirm", True)))
+
+
 def deidentify_study(input_path: str, output_path: str, profile: dict, keystore) -> dict:
     """De-identify one DICOM file or a folder of them; write valid DICOM out.
 
@@ -338,9 +367,32 @@ def deidentify_study(input_path: str, output_path: str, profile: dict, keystore)
                                  "skipped": f"not readable as DICOM: {e}"})
             continue
 
+        # Capture the study's real identifiers BEFORE metadata de-id mutates them,
+        # so unattended pixel OCR can seed on the true name/ID tokens.
+        known_for_pixels = (_collect_known_values(ds)
+                            if _pixel_autoredact_enabled(profile) else None)
+
         report = deidentify_dataset(ds, profile, salt, scanner=scanner)
         _record_crosswalk(keystore, report["records"])
         enriched = _enrich_records(report["records"])
+
+        # Opt-in unattended burned-in-pixel redaction: paint the OCR-proposed PHI
+        # boxes before writing. Metadata de-id leaves the pixels untouched, so the
+        # boxes detected on ds's original frames still line up. Never fatal to the
+        # metadata de-id already done.
+        counts = dict(report["counts"])
+        if known_for_pixels is not None and "PixelData" in ds:
+            try:
+                pscanner = _build_scanner(td, known_for_pixels)
+                res = _pixels.ocr_phi_boxes(ds, pscanner)
+                boxes = res.get("boxes", [])
+                if boxes:
+                    _pixels.redact_pixels(ds, boxes, fill=0)
+                counts["pixel_boxes_redacted"] = len(boxes)
+                if res.get("note"):
+                    counts["pixel_ocr_note"] = res["note"]
+            except Exception as e:  # noqa: BLE001 - pixel step must not lose the file
+                counts["pixel_redact_error"] = str(e)
 
         # keep file-meta consistent so the output stays a valid, viewable object
         if getattr(ds, "file_meta", None) is not None and "SOPInstanceUID" in ds:
@@ -351,7 +403,7 @@ def deidentify_study(input_path: str, output_path: str, profile: dict, keystore)
         os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
         pydicom.dcmwrite(out, ds, enforce_file_format=True)
         files_report.append({"input": full, "output": out,
-                             "counts": report["counts"], "records": enriched})
+                             "counts": counts, "records": enriched})
 
     processed = [f for f in files_report if f.get("output")]
     return {"files": files_report, "count": len(processed)}
@@ -374,7 +426,8 @@ def _enrich_records(records) -> list:
 def deid_run(input_path: str, output_path: str, profile_id: str = "default",
              keystore_path: str | None = None, passphrase: str | None = None,
              reversible: bool = True, sign_key_path: str | None = None,
-             signer: str | None = None, project_id: str | None = None) -> dict:
+             signer: str | None = None, project_id: str | None = None,
+             autoredact_pixels: bool = False) -> dict:
     """High-level entry used by the R UI.
 
     Loads the named profile, opens/creates a keystore (persisting the salt so
@@ -382,8 +435,19 @@ def deid_run(input_path: str, output_path: str, profile_id: str = "default",
     ``reversible``), de-identifies, records each output's before/after SHA-256,
     and — when ``sign_key_path`` is given — drops an Ed25519 sidecar signature
     next to every output. Returns the per-file report.
+
+    ``autoredact_pixels`` forces unattended burned-in-pixel redaction for this run
+    (as if a reviewer confirmed every OCR-proposed box): it turns the profile's
+    pixel cleaning on and human-confirm off. The shipped profile is unchanged for
+    every other caller - it keeps human confirmation as the safe default.
     """
     profile = profile_get(profile_id)
+    if autoredact_pixels:
+        profile = dict(profile)
+        profile["options"] = {**(profile.get("options") or {}),
+                              "clean_pixel_data": True}
+        profile["pixel"] = {**(profile.get("pixel") or {}),
+                            "auto_detect": True, "require_human_confirm": False}
     if keystore_path:
         if os.path.exists(keystore_path):
             ks_obj = _keystore.open(keystore_path, passphrase)
