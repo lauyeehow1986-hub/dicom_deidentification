@@ -43,6 +43,13 @@ def test_dicom_fixtures_are_valid_and_readback(tmp_path):
             img = nib.load(str(out / f["rel"]))
             assert img.get_fdata().size > 0
             continue
+        if f.get("encapsulated_pdf"):
+            # an embedded-PDF instance carries no PixelData; it must still be a
+            # valid Encapsulated PDF Storage object that reads back with its doc.
+            ds = _read_dcm(str(out / f["rel"]))
+            assert str(ds.SOPClassUID) == "1.2.840.10008.5.1.4.1.1.104.1"
+            assert "EncapsulatedDocument" in ds
+            continue
         ds = _read_dcm(str(out / f["rel"]))
         # pixels decode (incl. the compressed one) back to a real array
         assert ds.pixel_array.size > 0

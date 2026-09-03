@@ -12,6 +12,7 @@ against; ``generate_synthetic.py`` is a thin CLI over ``build_corpus``.
 """
 from __future__ import annotations
 
+import io
 import json
 import os
 
@@ -50,7 +51,8 @@ PLANTED = {
         "private_tags": True,
         "nested_sequence": True,
     },
-    "encodings": ["single_frame", "multiframe_cine", "rgb", "jpeg2000", "nifti"],
+    "encodings": ["single_frame", "multiframe_cine", "rgb", "jpeg2000", "nifti",
+                  "encapsulated_pdf"],
 }
 
 _SC_SOP = "1.2.840.10008.5.1.4.1.1.7"       # Secondary Capture Image Storage
@@ -73,6 +75,17 @@ def _burn_text_rgb(rows: int, cols: int, text: str) -> np.ndarray:
     img = Image.new("RGB", (cols, rows), (0, 0, 0))
     ImageDraw.Draw(img).text((4, rows // 2 - 4), text, fill=(240, 240, 200))
     return np.asarray(img, dtype=np.uint8)
+
+
+def _image_pdf_bytes(text: str) -> bytes:
+    """A one-page image PDF (no text layer) with the name visibly rendered."""
+    from PIL import Image, ImageDraw
+    img = Image.new("RGB", (480, 140), (255, 255, 255))
+    ImageDraw.Draw(img).text((12, 60), text, fill=(0, 0, 0))
+    buf = io.BytesIO()
+    img.save(buf, format="PDF")
+    b = buf.getvalue()
+    return b if len(b) % 2 == 0 else b + b"\x00"
 
 
 def _base_ds(sop_class: str) -> Dataset:
@@ -205,6 +218,19 @@ def build_corpus(out_dir: str) -> dict:
     fixtures.append({"rel": rel, "encoding": "nifti",
                      "transfer_syntax": "nifti-1", "burned_in": False})
 
+    # 6. Encapsulated PDF (embedded report with a planted visible name) ---------
+    _ENCAPS_PDF_SOP = "1.2.840.10008.5.1.4.1.1.104.1"
+    ds = _finalise(_base_ds(_ENCAPS_PDF_SOP), _ENCAPS_PDF_SOP)
+    ds.Modality = "DOC"
+    ds.MIMETypeOfEncapsulatedDocument = "application/pdf"
+    ds.EncapsulatedDocument = _image_pdf_bytes(PLANTED["names"][1])  # Tan Wei Ming
+    ds["EncapsulatedDocument"].VR = "OB"
+    rel = "encapsulated_pdf.dcm"
+    pydicom.dcmwrite(os.path.join(out_dir, rel), ds, enforce_file_format=True)
+    fixtures.append({"rel": rel, "encoding": "encapsulated_pdf",
+                     "transfer_syntax": str(ExplicitVRLittleEndian),
+                     "burned_in": True, "encapsulated_pdf": True})
+
     manifest = {"out": out_dir, "planted": PLANTED, "fixtures": fixtures}
     with open(os.path.join(out_dir, "planted_manifest.json"), "w",
               encoding="utf-8") as fh:
@@ -243,6 +269,26 @@ def _element_text(ds) -> str:
     return " ".join(parts)
 
 
+def _encapsulated_pdf_text(ds) -> str:
+    """Recoverable text from an embedded PDF: its text layer, plus OCR of the
+    rendered pages when Tesseract is available. Empty when there is no PDF."""
+    try:
+        from . import documents
+        if not documents.is_encapsulated_pdf(ds):
+            return ""
+        pdf_bytes = bytes(ds.EncapsulatedDocument)
+        parts = [documents.pdf_text(pdf_bytes)]
+        from . import pixels
+        ok, _ = pixels._ocr_available()
+        if ok:
+            for arr in documents.render_pdf_pages(pdf_bytes, dpi=150):
+                import pytesseract
+                parts.append(pytesseract.image_to_string(pixels._frame_to_uint8(arr)))
+        return " ".join(parts)
+    except Exception:  # noqa: BLE001 - survivor scan must never crash
+        return ""
+
+
 def check_survivors(out_dir: str, planted: dict | None = None) -> dict:
     """Exact-literal sweep for planted PHI over every output's metadata.
 
@@ -275,6 +321,7 @@ def check_survivors(out_dir: str, planted: dict | None = None) -> dict:
                 except Exception:  # noqa: BLE001
                     continue
                 text = _element_text(ds)
+                text += " " + _encapsulated_pdf_text(ds)
             n_files += 1
             norm = text.replace("^", " ").replace("=", " ")
             for cat in _LITERAL_CATS:
