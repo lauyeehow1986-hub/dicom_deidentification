@@ -425,6 +425,10 @@ def deidentify_study(input_path: str, output_path: str, profile: dict, keystore)
                 if res.get("note"):
                     counts["encapsulated_pdf_note"] = res["note"]
             except Exception as e:  # noqa: BLE001 - never lose the file over the PDF
+                # Fail CLOSED: if the PDF step blew up before it could redact or
+                # remove, strip the document so an un-redacted, identifiable PDF
+                # is never shipped in a study stamped PatientIdentityRemoved=YES.
+                _documents._remove_encapsulated_doc(ds)
                 counts["encapsulated_pdf_error"] = str(e)
 
         # keep file-meta consistent so the output stays a valid, viewable object

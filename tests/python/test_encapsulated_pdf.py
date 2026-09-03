@@ -130,3 +130,22 @@ def test_deid_run_pdf_mode_override(tmp_path):
         assert "EncapsulatedDocument" in out
     else:
         assert "EncapsulatedDocument" not in out
+
+
+def test_study_pdf_failure_fails_closed(tmp_path, monkeypatch):
+    """If the PDF redaction step raises for any reason, the study must NOT ship
+    the original identifiable PDF -- it removes the document (fail closed) even
+    though the object is still stamped de-identified."""
+    from deid_engine import documents as _d
+
+    def _boom(*a, **k):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.setattr(_d, "redact_encapsulated_pdf", _boom)
+    _write(_encaps_ds(), tmp_path / "in.dcm")
+    report = core.deidentify_study(str(tmp_path / "in.dcm"), str(tmp_path / "out.dcm"),
+                                   _profile("rasterize_redact"), keystore.ephemeral())
+    out = pydicom.dcmread(str(tmp_path / "out.dcm"))
+    assert str(out.PatientIdentityRemoved) == "YES"
+    assert "EncapsulatedDocument" not in out
+    assert "kaboom" in report["files"][0]["counts"].get("encapsulated_pdf_error", "")

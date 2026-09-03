@@ -134,3 +134,21 @@ def test_redact_encapsulated_pdf_reembeds_flattened_pdf_monkeypatched(monkeypatc
     assert len(blob) % 2 == 0                       # valid even-length OB
     assert documents.pdf_text(blob).strip() == ""   # flattened, no text layer
     assert ds.EncapsulatedDocumentLength == len(blob)
+
+
+def test_redact_encapsulated_pdf_removes_on_render_failure(monkeypatch):
+    """Fail CLOSED: if rendering/redaction raises for ANY reason (corrupt,
+    encrypted, zero-page PDF, ...) with OCR available, the document is removed,
+    never left as the original identifiable PDF."""
+    from deid_engine import pixels
+    monkeypatch.setattr(pixels, "_ocr_available", lambda: (True, ""))
+
+    def _boom(*a, **k):
+        raise RuntimeError("bad pdf")
+
+    monkeypatch.setattr(documents, "render_pdf_pages", _boom)
+    ds = _encapsulated_pdf_ds(_image_pdf_bytes("Tan Wei Ming"))
+    info = documents.redact_encapsulated_pdf(ds, _NameScanner(), dpi=100)
+    assert info["mode"] == "removed_fallback"
+    assert "bad pdf" in info["note"]
+    assert "EncapsulatedDocument" not in ds

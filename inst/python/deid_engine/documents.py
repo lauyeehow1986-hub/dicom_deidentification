@@ -95,26 +95,36 @@ def redact_pdf_bytes(pdf_bytes: bytes, scanner, dpi: int = 150):
     return flatten_to_pdf(redacted), {"pages": len(pages), "boxes": total_boxes}
 
 
+def _remove_encapsulated_doc(ds) -> None:
+    """Strip the embedded document and its descriptors (the fail-closed fallback)."""
+    for kw in ("EncapsulatedDocument", "MIMETypeOfEncapsulatedDocument",
+               "EncapsulatedDocumentLength"):
+        if kw in ds:
+            del ds[kw]
+
+
 def redact_encapsulated_pdf(ds, scanner, dpi: int = 150) -> dict:
-    """De-identify the embedded PDF in ``ds`` in place.
+    """De-identify the embedded PDF in ``ds`` in place, failing CLOSED.
 
     When OCR is available: rasterize + redact + flatten, replacing
-    EncapsulatedDocument with the flattened bytes. When OCR is absent: remove the
-    document (never keep an un-scanned PDF). Never raises for the missing-binary
-    case — that is the fallback, not an error.
+    EncapsulatedDocument with the flattened bytes. When OCR is absent, OR the
+    redaction attempt fails for ANY reason (unparseable / encrypted / zero-page
+    PDF, render or flatten error, ...): remove the document. An un-redacted,
+    identifiable PDF is never kept — the only outcomes are a flattened, redacted
+    PDF or no PDF at all. Never raises for these cases; that is the fallback.
     """
     ok, note = _pixels._ocr_available()
-    if not ok:
-        for kw in ("EncapsulatedDocument", "MIMETypeOfEncapsulatedDocument",
-                   "EncapsulatedDocumentLength"):
-            if kw in ds:
-                del ds[kw]
-        return {"mode": "removed_fallback", "note": note}
-    src = bytes(ds.EncapsulatedDocument)
-    flat, info = redact_pdf_bytes(src, scanner, dpi=dpi)
-    if len(flat) % 2 == 1:
-        flat += b"\x00"  # DICOM OB values are even-length
-    ds.EncapsulatedDocument = flat
-    if "EncapsulatedDocumentLength" in ds:
-        ds.EncapsulatedDocumentLength = len(flat)
-    return {"mode": "rasterize_redact", **info}
+    if ok:
+        try:
+            src = bytes(ds.EncapsulatedDocument)
+            flat, info = redact_pdf_bytes(src, scanner, dpi=dpi)
+            if len(flat) % 2 == 1:
+                flat += b"\x00"  # DICOM OB values are even-length
+            ds.EncapsulatedDocument = flat
+            if "EncapsulatedDocumentLength" in ds:
+                ds.EncapsulatedDocumentLength = len(flat)
+            return {"mode": "rasterize_redact", **info}
+        except Exception as e:  # noqa: BLE001 - fail CLOSED; never keep an un-redacted PDF
+            note = f"pdf redaction failed, document removed: {e}"
+    _remove_encapsulated_doc(ds)
+    return {"mode": "removed_fallback", "note": note}
