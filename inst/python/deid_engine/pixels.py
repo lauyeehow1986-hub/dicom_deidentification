@@ -110,32 +110,54 @@ def _configure_tesseract():
     return pytesseract.pytesseract.tesseract_cmd
 
 
+def _ocr_available():
+    """(-> (bool, note)) True when the Tesseract binary is usable. Degrades like
+    the Presidio/NER layers: a missing binary is reported, never fatal."""
+    try:
+        import pytesseract
+        _configure_tesseract()
+        pytesseract.get_tesseract_version()
+        return True, ""
+    except Exception as e:  # noqa: BLE001 - no binary on this box / air-gap
+        return False, f"ocr unavailable: {e}"
+
+
+def image_phi_boxes(img_uint8, scanner) -> list:
+    """OCR one 8-bit image; return PHI word boxes the scanner flags.
+
+    Assumes the caller has already confirmed OCR is available (``_ocr_available``).
+    Boxes are ``{x, y, w, h, text, source}`` with no frame key.
+    """
+    import pytesseract
+    from pytesseract import Output
+    data = pytesseract.image_to_data(img_uint8, output_type=Output.DICT)
+    boxes = []
+    for j, word in enumerate(data.get("text", [])):
+        if word and word.strip() and scanner.scan(word):
+            boxes.append({"x": int(data["left"][j]), "y": int(data["top"][j]),
+                          "w": int(data["width"][j]), "h": int(data["height"][j]),
+                          "text": word, "source": "ocr"})
+    return boxes
+
+
 def ocr_phi_boxes(ds, scanner) -> dict:
     """Optional: OCR each frame, keep boxes whose text the scanner flags as PHI.
 
     Degrades to an empty result (with a note) when the Tesseract binary is absent,
     exactly like the Presidio/NER layers in Phase 2.
     """
-    try:
-        import pytesseract
-        from pytesseract import Output
-        _configure_tesseract()
-        pytesseract.get_tesseract_version()
-    except Exception as e:  # noqa: BLE001 - no binary on this box / air-gap
-        return {"boxes": [], "note": f"ocr unavailable: {e}"}
-
+    ok, note = _ocr_available()
+    if not ok:
+        return {"boxes": [], "note": note}
     frames = load_frames(ds)
     boxes = []
     for i in range(frames.shape[0]):
         img = _frame_to_uint8(frames[i])
         try:
-            data = pytesseract.image_to_data(img, output_type=Output.DICT)
+            page_boxes = image_phi_boxes(img, scanner)
         except Exception as e:  # noqa: BLE001
             return {"boxes": boxes, "note": f"ocr failed on frame {i}: {e}"}
-        for j, word in enumerate(data.get("text", [])):
-            if word and word.strip() and scanner.scan(word):
-                boxes.append({"frame": i, "x": int(data["left"][j]),
-                              "y": int(data["top"][j]), "w": int(data["width"][j]),
-                              "h": int(data["height"][j]), "text": word,
-                              "source": "ocr"})
+        for b in page_boxes:
+            b["frame"] = i
+            boxes.append(b)
     return {"boxes": boxes}
