@@ -70,3 +70,51 @@ def pdf_text(pdf_bytes: bytes) -> str:
         return "\n".join(parts)
     finally:
         pdf.close()
+
+
+def redact_pdf_bytes(pdf_bytes: bytes, scanner, dpi: int = 150):
+    """Render -> OCR-redact PHI boxes per page -> flatten. Returns (bytes, info).
+
+    Caller must ensure OCR is available; this raises if it is not (no silent
+    keep of an un-scanned PDF).
+    """
+    ok, note = _pixels._ocr_available()
+    if not ok:
+        raise RuntimeError(note)
+    pages = render_pdf_pages(pdf_bytes, dpi=dpi)
+    total_boxes = 0
+    redacted = []
+    for arr in pages:
+        gray = _pixels._frame_to_uint8(arr)
+        boxes = _pixels.image_phi_boxes(gray, scanner)
+        total_boxes += len(boxes)
+        # apply_boxes wants a frame axis (N,H,W[,C]); wrap this single page.
+        stacked = arr[np.newaxis, ...]
+        stacked = _pixels.apply_boxes(stacked, boxes, fill=0)
+        redacted.append(stacked[0])
+    return flatten_to_pdf(redacted), {"pages": len(pages), "boxes": total_boxes}
+
+
+def redact_encapsulated_pdf(ds, scanner, dpi: int = 150) -> dict:
+    """De-identify the embedded PDF in ``ds`` in place.
+
+    When OCR is available: rasterize + redact + flatten, replacing
+    EncapsulatedDocument with the flattened bytes. When OCR is absent: remove the
+    document (never keep an un-scanned PDF). Never raises for the missing-binary
+    case — that is the fallback, not an error.
+    """
+    ok, note = _pixels._ocr_available()
+    if not ok:
+        for kw in ("EncapsulatedDocument", "MIMETypeOfEncapsulatedDocument",
+                   "EncapsulatedDocumentLength"):
+            if kw in ds:
+                del ds[kw]
+        return {"mode": "removed_fallback", "note": note}
+    src = bytes(ds.EncapsulatedDocument)
+    flat, info = redact_pdf_bytes(src, scanner, dpi=dpi)
+    if len(flat) % 2 == 1:
+        flat += b"\x00"  # DICOM OB values are even-length
+    ds.EncapsulatedDocument = flat
+    if "EncapsulatedDocumentLength" in ds:
+        ds.EncapsulatedDocumentLength = len(flat)
+    return {"mode": "rasterize_redact", **info}
