@@ -38,6 +38,11 @@ from .actions import DeidContext, apply_action
 # when no explicit action already covers the element.
 _TEXT_VRS = {"LO", "SH", "ST", "LT", "UT", "PN", "UC"}
 
+# EncapsulatedDocument (e.g. an embedded PDF report). Normally removed by the
+# catalog's `X` action; under `encapsulated_pdf.mode: rasterize_redact` the
+# study-level pipeline redacts it instead, so `_walk` must leave it in place.
+ENCAPS_DOC_TAG = 0x00420011  # EncapsulatedDocument
+
 # Tags whose values seed the header-token scrub of free text / pixels.
 _KNOWN_VALUE_TAGS = (
     0x00100010,  # PatientName
@@ -135,10 +140,13 @@ def _auto_scan(ds, tag, ctx, records) -> None:
         records.append(rec)
 
 
-def _walk(ds, amap, ctx, private_policy, allowlist, records, text_scan) -> None:
+def _walk(ds, amap, ctx, private_policy, allowlist, records, text_scan,
+          pdf_mode="remove") -> None:
     """Depth-first application of actions, recursing into sequences (SQ)."""
     for tag in list(ds.keys()):
         elem = ds[tag]
+        if int(tag) == ENCAPS_DOC_TAG and pdf_mode == "rasterize_redact":
+            continue  # leave the PDF bytes; deidentify_study redacts them
         if elem.VR == "SQ":
             tagi = int(tag)
             # An explicit remove/blank on the sequence itself (e.g. WaveformSequence
@@ -147,7 +155,8 @@ def _walk(ds, amap, ctx, private_policy, allowlist, records, text_scan) -> None:
                 records.append(apply_action(ds, tagi, amap[tagi], ctx))
                 continue
             for item in elem.value:
-                _walk(item, amap, ctx, private_policy, allowlist, records, text_scan)
+                _walk(item, amap, ctx, private_policy, allowlist, records,
+                      text_scan, pdf_mode)
             continue
         tagi = int(tag)
         if tagi in amap:
@@ -253,8 +262,10 @@ def deidentify_dataset(ds, profile: dict, salt: bytes, scanner=None) -> dict:
     private_policy = pt.get("policy", "strip_unknown")
     allowlist = {t for t in (_rules.parse_tag(x) for x in (pt.get("allowlist") or [])) if t}
 
+    pdf_mode = (profile.get("encapsulated_pdf") or {}).get("mode", "remove")
+
     records: list[dict] = []
-    _walk(ds, amap, ctx, private_policy, allowlist, records, text_scan)
+    _walk(ds, amap, ctx, private_policy, allowlist, records, text_scan, pdf_mode)
 
     changed = [r for r in records if r.get("action") != "K" and "note" not in r]
     by_action: dict[str, int] = {}

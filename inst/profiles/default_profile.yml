@@ -59,6 +59,15 @@ pixel:
   fill: black
   strip_audio: true
 
+# --- Embedded-PDF (EncapsulatedDocument) handling -------------------------------
+#   remove          - strip the whole embedded PDF (default, safe, no OCR needed)
+#   rasterize_redact - render pages, OCR-redact PHI, flatten to an image-only PDF
+#                      (keeps the report minus PHI; needs the bundled Tesseract;
+#                       degrades to `remove` when Tesseract is absent)
+encapsulated_pdf:
+  mode: remove
+  dpi: 150
+
 # --- text PHI detection (free-text tags, private text, SR content) ------------
 # Layered scanner (see docs/text-detection.md). The deterministic layers ALWAYS
 # run on the air-gapped box: header-token scrub (the study's real name/ID tokens
