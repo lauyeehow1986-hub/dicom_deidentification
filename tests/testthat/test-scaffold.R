@@ -60,6 +60,12 @@ test_that("Phase 5 bulk module UI builds without error", {
   expect_error(mod_bulk_ui("bulk"), NA)
 })
 
+test_that("Phase 6 QA + audit module UIs and identity control build without error", {
+  expect_error(mod_qa_ui("qa"), NA)
+  expect_error(mod_audit_ui("audit"), NA)
+  expect_error(identity_control(), NA)
+})
+
 test_that("top-level UI builds without error", {
   expect_error(app_ui(), NA)
 })

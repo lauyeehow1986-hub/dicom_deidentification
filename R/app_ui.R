@@ -19,7 +19,25 @@ app_ui <- function() {
     bslib::nav_panel("Audit",        mod_audit_ui("audit")),
 
     bslib::nav_spacer(),
+    bslib::nav_item(identity_control()),
     bslib::nav_item(shiny::uiOutput("engine_status", inline = TRUE))
+  )
+}
+
+#' Compact "acting as" control (name + role) in the navbar. Role drives the QA
+#' sign-off gate; the name is recorded as the actor in the audit log. A production
+#' deployment can replace this with an OS/AD or shinymanager login.
+identity_control <- function() {
+  shiny::div(
+    class = "d-flex align-items-center gap-2 me-2",
+    shiny::tags$span(class = "small text-muted", "acting as"),
+    shiny::div(class = "mb-0",
+      shiny::textInput("acting_user", label = NULL, placeholder = "your name",
+                       width = "120px")),
+    shiny::div(class = "mb-0",
+      shiny::selectInput("acting_role", label = NULL, width = "150px",
+                         choices = c("De-identifier" = "deidentifier",
+                                     "Reviewer" = "reviewer")))
   )
 }
 

@@ -13,12 +13,19 @@ app_server <- function(input, output, session) {
 
   # Shared application state passed to modules (profile, engine handle, role, ...).
   app_state <- shiny::reactiveValues(
-    role       = "deidentifier",  # deidentifier | reviewer  (set by auth.R later)
+    role       = "deidentifier",  # deidentifier | reviewer  (from the navbar control)
+    user       = "",              # acting user's name (recorded in the audit log)
     profile_id = "default",       # active profile the workflow tabs use
     profile    = load_profile("default"),
     profiles_version = 0L,         # bumped to refresh profile lists across tabs
     engine     = engine_handle()  # lazy; NULL-safe when the venv isn't built yet
   )
+
+  # The navbar "acting as" control drives role (QA sign-off gate) + audit actor.
+  shiny::observeEvent(input$acting_role, app_state$role <- input$acting_role,
+                      ignoreInit = TRUE)
+  shiny::observeEvent(input$acting_user, app_state$user <- input$acting_user,
+                      ignoreInit = TRUE)
 
   mod_interactive_server("interactive", app_state)
   mod_pixels_server("pixels", app_state)

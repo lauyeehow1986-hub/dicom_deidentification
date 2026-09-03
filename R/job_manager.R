@@ -255,3 +255,35 @@ drain <- function(con, deid_fn, worker = "w1", batch_id = NULL,
   }
   processed
 }
+
+#' Who registered/ran a batch (the de-identifier), for the QA sign-off gate.
+batch_created_by <- function(con, batch_id) {
+  r <- DBI::dbGetQuery(con, "SELECT created_by FROM batches WHERE batch_id = ?",
+                       params = list(batch_id))
+  if (nrow(r) && !is.na(r$created_by[[1]]) && nzchar(r$created_by[[1]]))
+    r$created_by[[1]] else NA_character_
+}
+
+#' Output paths recorded for a batch (or the whole manifest), for QA re-scanning.
+manifest_output_paths <- function(con, batch_id = NULL) {
+  if (is.null(batch_id)) {
+    DBI::dbGetQuery(con,
+      "SELECT output_path FROM files WHERE output_path IS NOT NULL")$output_path
+  } else {
+    DBI::dbGetQuery(con,
+      "SELECT output_path FROM files WHERE batch_id = ? AND output_path IS NOT NULL",
+      params = list(batch_id))$output_path
+  }
+}
+
+#' Phase 6: record a QA residual scan on an output row. A non-zero residual count
+#' moves the row to `flagged`; zero (re)marks it `done`. Matched by output_path
+#' so QA can annotate a batch after the fact.
+set_residual <- function(con, output_path, residual_count) {
+  rc <- suppressWarnings(as.integer(residual_count))
+  status <- if (!is.na(rc) && rc > 0L) "flagged" else "done"
+  DBI::dbExecute(
+    con,
+    "UPDATE files SET status = ?, residual_count = ?, finished_at = ? WHERE output_path = ?",
+    params = list(status, rc, .now(), output_path))
+}

@@ -570,6 +570,144 @@ def pixel_redact(input_path: str, output_path: str, boxes=None,
     return rec
 
 
-def scan_residual(path: str, catalog: dict) -> dict:
-    """Phase 6. Re-run all detectors on an OUTPUT and report any residual PHI."""
-    raise NotImplementedError("scan_residual lands in Phase 6 (QA)")
+def _mask_preview(text: str) -> str:
+    """Mask a detected identifier so the QA report can locate it WITHOUT
+    re-disclosing it verbatim: keep the first/last character, bullet the middle."""
+    s = str(text or "")
+    if len(s) <= 2:
+        return "•" * len(s)
+    return s[0] + ("•" * (len(s) - 2)) + s[-1]
+
+
+# De-identification provenance fields the pipeline writes itself. Their values
+# are ours, not patient PHI, so the residual scan skips them (Presidio otherwise
+# mistakes the method string "dicomdeid: ..." for a person name).
+_DEID_PROVENANCE_TAGS = frozenset({
+    0x00120062,  # PatientIdentityRemoved
+    0x00120063,  # DeidentificationMethod
+    0x00120064,  # DeidentificationMethodCodeSequence
+})
+
+
+def _iter_text_elements(ds, _tag=None):
+    """Yield (tagi, keyword, value_str) for every free-text element, recursing
+    into sequences (SQ) so PHI hidden in SR ContentSequence is reached too."""
+    from pydicom.datadict import keyword_for_tag
+    for tag in list(ds.keys()):
+        elem = ds[tag]
+        if elem.VR == "SQ":
+            for item in elem.value:
+                yield from _iter_text_elements(item)
+            continue
+        if elem.VR not in _TEXT_VRS:
+            continue
+        tagi = int(tag)
+        raw = elem.value
+        for piece in (raw if isinstance(raw, (list, tuple)) else [raw]):
+            s = str(piece).strip()
+            if s:
+                kw = keyword_for_tag(tagi) or hex(tagi)
+                yield tagi, kw, s
+
+
+def scan_residual(path: str, profile_id: str = "default",
+                  scan_pixels: bool = True, min_score: float = 0.5) -> dict:
+    """Phase 6. Re-run the detectors on an OUTPUT file and report residual PHI.
+
+    Independent of the de-id run: it builds the layered scanner from the
+    profile's ``text_detection`` block but with an EMPTY header-token layer, so
+    the pseudonyms already written into the output header are not themselves
+    counted as PHI. The gazetteer + SG recognisers (+ optional Presidio/NER)
+    then catch any real identifier that survived in metadata or pixels.
+
+    Returns per-category counts, a masked findings list, and a pass/fail verdict
+    (``passed`` is true when nothing scored at or above ``min_score``).
+    """
+    import pydicom
+
+    ds = pydicom.dcmread(path)
+    td = profile_get(profile_id).get("text_detection") or {}
+    scanner = _build_scanner(td, [])   # no header-token seeding on outputs
+
+    findings: list[dict] = []
+    for tagi, kw, value in _iter_text_elements(ds):
+        if tagi in _DEID_PROVENANCE_TAGS:
+            continue  # our own de-id provenance string, not patient PHI
+        for span in scanner.scan(value):
+            findings.append({
+                "location": "metadata", "tag": tagi, "keyword": kw,
+                "category": span.category, "source": span.source,
+                "score": float(span.score), "preview": _mask_preview(span.text),
+            })
+
+    n_meta = len(findings)
+    notes = list(getattr(scanner, "notes", []))
+
+    if scan_pixels and "PixelData" in ds:
+        try:
+            res = _pixels.ocr_phi_boxes(ds, scanner)
+            for b in res.get("boxes", []):
+                spans = scanner.scan(b.get("text", ""))
+                cat = spans[0].category if spans else "text"
+                score = spans[0].score if spans else 1.0
+                findings.append({
+                    "location": "pixels", "tag": None, "keyword": "PixelData",
+                    "category": cat, "source": "ocr", "score": float(score),
+                    "preview": _mask_preview(b.get("text", "")),
+                })
+            if res.get("note"):
+                notes.append(res["note"])
+        except Exception as e:  # noqa: BLE001 - pixel scan must never crash QA
+            notes.append(f"pixel scan skipped: {e}")
+
+    n_pixels = len(findings) - n_meta
+
+    by_category: dict[str, int] = {}
+    for f in findings:
+        by_category[f["category"]] = by_category.get(f["category"], 0) + 1
+
+    passed = not any(f["score"] >= min_score for f in findings)
+    identity_removed = str(getattr(ds, "PatientIdentityRemoved", "")) == "YES"
+
+    return {
+        "path": path,
+        "findings": findings,
+        "by_category": by_category,
+        "counts": {"total": len(findings), "metadata": n_meta, "pixels": n_pixels},
+        "passed": passed,
+        "identity_removed": identity_removed,
+        "notes": notes,
+    }
+
+
+def scan_residual_dir(output_path: str, profile_id: str = "default",
+                      scan_pixels: bool = True, min_score: float = 0.5) -> dict:
+    """Residual scan over every file under an output folder (or a single file).
+
+    Aggregates per-file results into a batch verdict. Unreadable files are
+    reported as skipped rather than failing the whole scan.
+    """
+    per_file = []
+    total_by_cat: dict[str, int] = {}
+    n_pass = n_fail = 0
+    for full, rel in _iter_input_files(output_path):
+        try:
+            r = scan_residual(full, profile_id, scan_pixels, min_score)
+        except Exception as e:  # noqa: BLE001
+            per_file.append({"path": full, "rel": rel, "skipped": str(e)})
+            continue
+        r["rel"] = rel
+        per_file.append(r)
+        for c, n in r["by_category"].items():
+            total_by_cat[c] = total_by_cat.get(c, 0) + n
+        if r["passed"]:
+            n_pass += 1
+        else:
+            n_fail += 1
+    return {
+        "root": output_path,
+        "files": per_file,
+        "by_category": total_by_cat,
+        "summary": {"scanned": n_pass + n_fail, "passed": n_pass, "flagged": n_fail},
+        "passed": n_fail == 0,
+    }

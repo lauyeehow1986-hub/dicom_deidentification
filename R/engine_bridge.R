@@ -112,3 +112,11 @@ engine_tag_capture <- function(category, value, profile_id = "default",
 engine_ner_export <- function(out_path = NULL) {
   call_engine("ner_export_examples", out_path)
 }
+
+#' Phase 6 QA: re-run the detectors on an OUTPUT and report residual PHI.
+#' Returns the per-file residual report (masked previews, per-category counts,
+#' pass/fail verdict) as an R list.
+engine_scan_residual <- function(path, profile_id = "default",
+                                 scan_pixels = TRUE, min_score = 0.5) {
+  call_engine("scan_residual", path, profile_id, scan_pixels, min_score)
+}

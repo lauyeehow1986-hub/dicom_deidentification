@@ -20,7 +20,9 @@ Imports:
     DBI,
     RSQLite,
     yaml,
-    jsonlite
+    jsonlite,
+    digest,
+    openssl
 Suggests:
     mirai,
     future,

@@ -11,7 +11,7 @@ running acceptance test from Phase 1 onward.
 | **3** | Pixel / burned-in PHI | Frame/RGB/multiframe decode (incl. JPEG2000/RLE); Pixels viewer with OCR-proposed + manual redaction boxes; decompress→redact→write valid uncompressed DICOM; audio/waveform strip. **(done)** — OCR degrades gracefully w/o Tesseract; optional defacing deferred. |
 | **4** | Profiles & self-improvement | Rules/profile editor + per-project profiles (writable workspace overrides shipped defaults); tag-a-miss capture -> project gazetteer/custom-regex + labeled-example store; NER fine-tuning export hook. See [docs/profiles-self-improvement.md](profiles-self-improvement.md). **(done)** |
 | **5** | Bulk engine | SQLite manifest job queue; mirai/future parallel workers; resumable/checkpointed; ~2 TB streaming; progress dashboard. See [docs/bulk-engine.md](bulk-engine.md). **(done)** |
-| **6** | QA & governance | Automated residual-PHI scan on outputs; sampling review; pass/fail report; two-role auth (de-identifier -> reviewer) with gated sign-off + audit log. |
+| **6** | QA & governance | Automated residual-PHI scan on outputs; sampling review; pass/fail report; two-role auth (de-identifier -> reviewer) with gated sign-off + audit log. See [docs/qa-governance.md](qa-governance.md). **(done)** |
 | **7** | Packaging & air-gap | Reproducible bundle (R library + relocatable venv + NER model + optional dcmtk); offline install doc; synthetic acceptance corpus; validation. |
 
 ## Cross-cutting invariants
