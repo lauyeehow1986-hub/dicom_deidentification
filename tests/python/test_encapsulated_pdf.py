@@ -116,3 +116,17 @@ def test_study_rasterize_success_branch_monkeypatched(tmp_path, monkeypatch):
     assert documents.pdf_text(bytes(out.EncapsulatedDocument)).strip() == ""
     # the DICOM-level identifiers were still de-identified
     assert "Tan" not in str(out.get("PatientName", "")).replace("^", " ")
+
+
+def test_deid_run_pdf_mode_override(tmp_path):
+    _write(_encaps_ds(), tmp_path / "in.dcm")
+    rep = core.deid_run(str(tmp_path / "in.dcm"), str(tmp_path / "out.dcm"),
+                        profile_id="default", pdf_mode="rasterize_redact", pdf_dpi=100)
+    assert rep["count"] == 1
+    from deid_engine import pixels
+    ok, _ = pixels._ocr_available()
+    out = pydicom.dcmread(str(tmp_path / "out.dcm"))
+    if ok:
+        assert "EncapsulatedDocument" in out
+    else:
+        assert "EncapsulatedDocument" not in out

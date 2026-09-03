@@ -460,7 +460,8 @@ def deid_run(input_path: str, output_path: str, profile_id: str = "default",
              keystore_path: str | None = None, passphrase: str | None = None,
              reversible: bool = True, sign_key_path: str | None = None,
              signer: str | None = None, project_id: str | None = None,
-             autoredact_pixels: bool = False) -> dict:
+             autoredact_pixels: bool = False,
+             pdf_mode: str | None = None, pdf_dpi: int | None = None) -> dict:
     """High-level entry used by the R UI.
 
     Loads the named profile, opens/creates a keystore (persisting the salt so
@@ -473,6 +474,11 @@ def deid_run(input_path: str, output_path: str, profile_id: str = "default",
     (as if a reviewer confirmed every OCR-proposed box): it turns the profile's
     pixel cleaning on and human-confirm off. The shipped profile is unchanged for
     every other caller - it keeps human confirmation as the safe default.
+
+    ``pdf_mode``/``pdf_dpi`` override the profile's ``encapsulated_pdf`` policy
+    (mode/dpi) for this run only; ``None`` (the default) leaves the profile's
+    setting untouched. As with ``autoredact_pixels``, the shipped profile object
+    is never mutated - only a local copy.
     """
     profile = profile_get(profile_id)
     if autoredact_pixels:
@@ -481,6 +487,14 @@ def deid_run(input_path: str, output_path: str, profile_id: str = "default",
                               "clean_pixel_data": True}
         profile["pixel"] = {**(profile.get("pixel") or {}),
                             "auto_detect": True, "require_human_confirm": False}
+    if pdf_mode is not None or pdf_dpi is not None:
+        profile = dict(profile)
+        ep = dict(profile.get("encapsulated_pdf") or {})
+        if pdf_mode is not None:
+            ep["mode"] = pdf_mode
+        if pdf_dpi is not None:
+            ep["dpi"] = int(pdf_dpi)
+        profile["encapsulated_pdf"] = ep
     if keystore_path:
         if os.path.exists(keystore_path):
             ks_obj = _keystore.open(keystore_path, passphrase)

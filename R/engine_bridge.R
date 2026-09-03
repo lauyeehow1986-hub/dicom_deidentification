@@ -56,10 +56,11 @@ engine_deid_run <- function(input_path, output_path, profile_id = "default",
                             keystore_path = NULL, passphrase = NULL,
                             reversible = TRUE, sign_key_path = NULL,
                             signer = NULL, project_id = NULL,
-                            autoredact_pixels = FALSE) {
+                            autoredact_pixels = FALSE,
+                            pdf_mode = NULL, pdf_dpi = NULL) {
   call_engine("deid_run", input_path, output_path, profile_id, keystore_path,
               passphrase, reversible, sign_key_path, signer, project_id,
-              autoredact_pixels)
+              autoredact_pixels, pdf_mode, pdf_dpi)
 }
 
 #' Phase 6.5 integrity + signing + metadata bridges.
