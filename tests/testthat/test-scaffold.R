@@ -70,6 +70,10 @@ test_that("Phase 6.5 Projects module UI builds without error", {
   expect_error(mod_projects_ui("projects"), NA)
 })
 
+test_that("Phase 7 Validation module UI builds without error", {
+  expect_error(mod_validation_ui("validation"), NA)
+})
+
 test_that("top-level UI builds without error", {
   expect_error(app_ui(), NA)
 })

@@ -142,3 +142,25 @@ engine_scan_residual <- function(path, profile_id = "default",
                                  scan_pixels = TRUE, min_score = 0.5) {
   call_engine("scan_residual", path, profile_id, scan_pixels, min_score)
 }
+
+#' Phase 6 QA: residual scan over an OUTPUT folder (or single file), aggregated.
+engine_scan_residual_dir <- function(output_path, profile_id = "default",
+                                     scan_pixels = TRUE, min_score = 0.5) {
+  call_engine("scan_residual_dir", output_path, profile_id, scan_pixels, min_score)
+}
+
+#' Phase 7: build the synthetic planted-PHI acceptance corpus under `out_dir`.
+engine_build_corpus <- function(out_dir) call_engine("build_corpus", out_dir)
+
+#' Phase 7: literal planted-PHI survivor sweep over de-identified outputs.
+engine_check_survivors <- function(out_dir) call_engine("check_survivors", out_dir)
+
+#' Phase 7: reversibility policy (reversible flag + crosswalk size) of a keystore.
+engine_keystore_summary <- function(keystore_path, passphrase) {
+  call_engine("keystore_summary", keystore_path, passphrase)
+}
+
+#' Phase 7: authorised re-identification of a pseudonym (NULL if irreversible).
+engine_keystore_reverse <- function(keystore_path, passphrase, pseudonym) {
+  call_engine("keystore_reverse", keystore_path, passphrase, pseudonym)
+}

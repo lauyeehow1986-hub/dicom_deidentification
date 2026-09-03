@@ -86,8 +86,11 @@ def find_email(text: str) -> list[PhiSpan]:
 
 # SG phone: optional +65 / 65, then an 8-digit local number starting 3/6/8/9,
 # allowing one space/hyphen after the 4th digit. Bare 7-digit numbers are ignored.
+# The boundaries reject alphanumerics on either side (not just digits) so an
+# 8-digit run embedded in a hashed pseudonym (e.g. "87591237cef8c902") is not
+# mistaken for a phone number by the QA residual scan.
 _PHONE_RE = re.compile(
-    r"(?<!\d)(?:\+?65[\s-]?)?([3689]\d{3})[\s-]?(\d{4})(?!\d)")
+    r"(?<![0-9A-Za-z])(?:\+?65[\s-]?)?([3689]\d{3})[\s-]?(\d{4})(?![0-9A-Za-z])")
 
 
 def find_phone(text: str) -> list[PhiSpan]:

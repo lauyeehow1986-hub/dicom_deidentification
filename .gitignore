@@ -42,8 +42,18 @@ inst/models/
 *.sqlite
 *.sqlite3
 keystore/
+keystores/
 crosswalk/
 audit/
+# Ed25519 signing keys + any stray global keystore at the repo root: SECRETS
+# (re-link patients / sign as the pipeline) -> never commit.
+signing/
+*.key
+*.pem
+/global.json
+
+# --- Phase 7 build output (staged portable bundle) ---
+/dist/
 
 # --- OS / editor ---
 .DS_Store

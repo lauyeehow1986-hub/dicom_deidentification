@@ -269,6 +269,46 @@ def _record_crosswalk(keystore, records) -> None:
             keystore.record(hex(r["tag"]), r["original"], r["result"])
 
 
+_NIFTI_EXTS = (".nii", ".nii.gz")
+# NIfTI-1/2 header text fields that can carry free-text PHI.
+_NIFTI_TEXT_FIELDS = ("descrip", "aux_file", "intent_name")
+
+
+def _is_nifti(path: str) -> bool:
+    low = path.lower()
+    return any(low.endswith(ext) for ext in _NIFTI_EXTS)
+
+
+def _deidentify_nifti(full: str, out: str) -> dict:
+    """Copy a NIfTI volume through unchanged, blanking header free-text fields.
+
+    NIfTI carries no structured patient identifiers; its only free-text PHI
+    surface is the header ``descrip``/``aux_file``/``intent_name`` fields. The
+    image data and affine are preserved exactly ("NIfTI out for NIfTI in").
+    """
+    import nibabel as nib
+    import numpy as np
+
+    img = nib.load(full)
+    hdr = img.header.copy()
+    scrubbed = 0
+    for field in _NIFTI_TEXT_FIELDS:
+        try:
+            cur = bytes(hdr[field]).split(b"\x00", 1)[0]
+        except (KeyError, ValueError):
+            continue
+        if cur:
+            scrubbed += 1
+        hdr[field] = b""
+    out_img = nib.Nifti1Image(
+        np.asanyarray(img.dataobj), img.affine, header=hdr)
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    nib.save(out_img, out)
+    return {"input": full, "output": out,
+            "counts": {"nifti_header_fields_scrubbed": scrubbed},
+            "records": []}
+
+
 def deidentify_study(input_path: str, output_path: str, profile: dict, keystore) -> dict:
     """De-identify one DICOM file or a folder of them; write valid DICOM out.
 
@@ -288,6 +328,9 @@ def deidentify_study(input_path: str, output_path: str, profile: dict, keystore)
 
     for full, rel in _iter_input_files(input_path):
         out = output_path if single_file else os.path.join(output_path, rel)
+        if _is_nifti(full):
+            files_report.append(_deidentify_nifti(full, out))
+            continue
         try:
             ds = pydicom.dcmread(full)
         except Exception as e:
@@ -368,6 +411,26 @@ def deid_run(input_path: str, output_path: str, profile_id: str = "default",
                       "project_id": project_id or "", "signed_by": signer or ""},
                 sign_key_path)
     return report
+
+
+def keystore_summary(path: str, passphrase: str) -> dict:
+    """Reversibility policy + crosswalk size of a persisted keystore.
+
+    Used by the acceptance runner and the keystore review screen to confirm the
+    policy is honoured: reversible stores keep a populated crosswalk;
+    irreversible stores persist only the salt (never a mapping).
+    """
+    ks = _keystore.open(path, passphrase)
+    return {"reversible": ks.reversible, "n_crosswalk": len(ks._crosswalk)}
+
+
+def keystore_reverse(path: str, passphrase: str, pseudonym: str):
+    """Authorised re-identification: map a pseudonym back to its original.
+
+    Returns the original value in reversible mode, or ``None`` (irreversible, or
+    unknown pseudonym).
+    """
+    return _keystore.open(path, passphrase).reverse(pseudonym)
 
 
 # --------------------------------------------------------------------------- #

@@ -33,6 +33,8 @@ from .core import (
     scan_residual,       # Phase 6
     scan_residual_dir,   # Phase 6
     read_metadata,       # Phase 6.5 (reviewer metadata view)
+    keystore_summary,    # Phase 7 (reversibility policy check)
+    keystore_reverse,    # Phase 7 (authorised re-identification)
 )
 from .signing import (
     file_sha256,         # Phase 6.5 (integrity checksum)
@@ -40,6 +42,8 @@ from .signing import (
     sign_output,
     verify_output,
 )
+from . import corpus    # Phase 7 (synthetic acceptance corpus)
+from .corpus import build_corpus, check_survivors
 
 __all__ = [
     "ACTION_CODES",
@@ -59,8 +63,13 @@ __all__ = [
     "scan_residual",
     "scan_residual_dir",
     "read_metadata",
+    "keystore_summary",
+    "keystore_reverse",
     "file_sha256",
     "ensure_keypair",
     "sign_output",
     "verify_output",
+    "corpus",
+    "build_corpus",
+    "check_survivors",
 ]

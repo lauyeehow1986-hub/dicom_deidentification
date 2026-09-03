@@ -38,6 +38,7 @@ app_server <- function(input, output, session) {
   mod_qa_server("qa", app_state)
   mod_keystore_server("keystore", app_state)
   mod_audit_server("audit", app_state)
+  mod_validation_server("validation", app_state)
 
   output$engine_status <- shiny::renderUI({
     ok <- isTRUE(app_state$engine$available)

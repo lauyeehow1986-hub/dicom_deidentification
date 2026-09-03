@@ -18,6 +18,7 @@ app_ui <- function() {
     bslib::nav_panel("QA / Review",  mod_qa_ui("qa")),
     bslib::nav_panel("Keystore",     mod_keystore_ui("keystore")),
     bslib::nav_panel("Audit",        mod_audit_ui("audit")),
+    bslib::nav_panel("Validation",   mod_validation_ui("validation")),
 
     bslib::nav_spacer(),
     bslib::nav_item(identity_control()),

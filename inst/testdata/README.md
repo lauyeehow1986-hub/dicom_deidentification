@@ -15,3 +15,9 @@ Planted identifiers cover:
   and **compressed** (JPEG2000) samples; plus a **NIfTI** variant.
 
 The QA residual scan (Phase 6) runs against outputs and must find **zero** planted identifiers.
+
+`generate_synthetic.py` is a thin CLI over `deid_engine.corpus.build_corpus`, which is the tested
+implementation (`tests/python/test_corpus.py`). The Phase-7 acceptance runner (`R/acceptance.R`,
+and the app's **Validation** tab) builds this corpus, de-identifies it, and grades the result —
+including `corpus.check_survivors`, an exact-literal sweep that fails if any planted value survives
+in output metadata.

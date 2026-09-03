@@ -81,6 +81,20 @@ def test_does_not_flag_seven_digit_number_as_phone():
     assert ts.find_phone("value 1234567 units") == []
 
 
+def test_does_not_flag_digit_run_inside_alnum_hash_as_phone():
+    # A pseudonym like an 8-digit run glued to hex letters is NOT a phone
+    # number; the QA residual scan must not false-flag de-identified output.
+    assert ts.find_phone("87591237cef8c902") == []
+    assert ts.find_phone("id 87591237cef8c902 end") == []
+    assert ts.find_phone("AB87591237") == []
+
+
+def test_still_flags_real_phone_at_token_boundaries():
+    assert ts.find_phone("mobile 91234567")[0].text.strip() == "91234567"
+    assert ts.find_phone("call +65 9123 4567 now")[0].category == "phone"
+    assert ts.find_phone("(62345678)")[0].text.strip() == "62345678"
+
+
 # --- Gazetteer --------------------------------------------------------------
 
 def test_gazetteer_matches_multiracial_names_case_insensitively():
