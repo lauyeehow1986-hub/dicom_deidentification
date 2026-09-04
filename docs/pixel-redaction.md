@@ -48,3 +48,14 @@ for any residual PHI in metadata *and* pixels.
 metadata pass also removes it via the catalog (`biometrics` -> X); Phase 3 fixed the
 walker so an explicit X/Z on a sequence removes the whole sequence instead of
 recursing into it.
+
+## NIfTI burned-in text
+
+Burned-in-text OCR now runs on NIfTI volumes too (previously header-only). Each
+in-plane slice (along the volume's shortest axis) is OCR'd with the same SG-aware
+scanner as DICOM pixels. The interactive flow proposes boxes for confirmation;
+bulk/acceptance runs auto-redact. Degrades to a noted skip without Tesseract.
+
+The residual-PHI QA scan is likewise NIfTI-aware: it re-checks NIfTI outputs'
+header fields and (when Tesseract is present) OCR-scans their slices, so a
+surviving burned-in identifier is caught by the same pass/fail report as DICOM.

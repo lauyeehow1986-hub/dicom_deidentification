@@ -8,7 +8,8 @@ composes a *portable R* runtime in, so the target needs nothing pre-installed:
   1. shinyalcatraz::build_portable() -> portable R + the app's R packages + the
      app source, copied under <Out>/app, with a run.bat launcher.
   2. The relocatable Python engine venv (inst/python, incl. .venv) is copied in.
-  3. The transformer NER model (inst/models) is copied in.
+  3. The models under inst/models (transformer NER + optional defacing model)
+     are copied in.
   4. The portable Tesseract OCR runtime (vendor/tesseract) is copied to app/bin.
   5. The Ed25519 signing keys (workspace/signing) are copied in unless
      -SkipSecrets. (There is NO pre-made global keystore: set its passphrase on
@@ -104,6 +105,9 @@ Robo (Join-Path $repo "inst\python") (Join-Path $OutApp "inst\python")
 if (-not (Test-Path (Join-Path $OutApp "inst\python\.venv"))) {
     Write-Warning "No relocatable venv staged - build it first: inst/python/build_venv.ps1 -Phi -Ner"
 }
+# /E recursion mirrors the whole inst/models tree: the transformer NER model
+# AND, when present, inst/models/deface/ (the optional defacing model) - absent
+# means the deface step degrades to a noted skip on the target, same as NER.
 Robo (Join-Path $repo "inst\models") (Join-Path $OutApp "inst\models")
 if (-not (Test-Path (Join-Path $OutApp "inst\models"))) {
     Write-Warning "No NER model staged (inst/models) - the transformer NER layer will be off."
