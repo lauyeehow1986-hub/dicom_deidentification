@@ -8,6 +8,23 @@
 
 # --- helpers ---------------------------------------------------------------
 
+# Deface acceptance signal: a file carrying a `deface` record must be defaced or
+# a recognised graceful skip; a `deface_error` means the step blew up -> fail.
+# Uses exact-match `[[ ]]` accessors: `$` partial-matches `deface` to
+# `deface_error` and would crash on the error-only path this must grade.
+.acc_deface_signal <- function(files) {
+  deface_recs <- Filter(Negate(is.null),
+                        lapply(files, function(f) f$counts[["deface"]]))
+  deface_errs <- sum(vapply(files,
+                            function(f) !is.null(f$counts[["deface_error"]]),
+                            logical(1)))
+  deface_applied <- sum(vapply(deface_recs,
+                               function(d) isTRUE(d[["defaced"]]), logical(1)))
+  list(ok = deface_errs == 0,
+       detail = sprintf("%d deface record(s), %d defaced, %d error(s)",
+                        length(deface_recs), deface_applied, deface_errs))
+}
+
 .acc_survivor_str <- function(metadata_survivors) {
   if (length(metadata_survivors) == 0) return("")
   parts <- vapply(names(metadata_survivors), function(cat) {
@@ -205,18 +222,6 @@ acceptance_run <- function(work_dir = tempfile("acc_"),
   reprocessed <- tryCatch(.acc_resume_probe(work_dir, corpus_dir, profile_id),
                           error = function(e) NA_integer_)
 
-  # Defacing verdict: a file carrying a `deface` record must be defaced or a
-  # recognised graceful skip; a `deface_error` means the step blew up -> fail.
-  deface_recs <- Filter(Negate(is.null),
-                        lapply(rep$files, function(f) f$counts$deface))
-  deface_errs <- sum(vapply(rep$files,
-                           function(f) !is.null(f$counts$deface_error), logical(1)))
-  deface_applied <- sum(vapply(deface_recs,
-                              function(d) isTRUE(d$defaced), logical(1)))
-  deface_ok <- deface_errs == 0
-  deface_detail <- sprintf("%d deface record(s), %d defaced, %d error(s)",
-                          length(deface_recs), deface_applied, deface_errs)
-
   raw <- list(
     deid = list(count = rep$count %||% length(outputs), n_inputs = n_input_files),
     survivors = survivors,
@@ -225,7 +230,7 @@ acceptance_run <- function(work_dir = tempfile("acc_"),
     validity = list(ok = length(invalid) == 0, invalid = invalid),
     reversibility = reversibility,
     resume = list(reprocessed = reprocessed),
-    deface = list(ok = deface_ok, detail = deface_detail))
+    deface = .acc_deface_signal(rep$files))
 
   report <- acceptance_checks(raw)
   md <- acceptance_report_md(report, title = "DICOM de-identification acceptance",

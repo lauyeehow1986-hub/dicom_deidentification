@@ -117,3 +117,28 @@ test_that("acceptance_checks fails deface when a deface_error occurred", {
   expect_false(row$passed)
   expect_false(rep$passed)
 })
+
+test_that(".acc_deface_signal fails (never crashes) on a deface_error-only file", {
+  # Python sets exactly one of counts$deface / counts$deface_error. A file with
+  # only deface_error must yield ok=FALSE, not crash via $-partial-matching.
+  files <- list(list(counts = list(deface_error = "boom")))
+  sig <- .acc_deface_signal(files)
+  expect_false(sig$ok)
+  expect_match(sig$detail, "1 error")
+})
+
+test_that(".acc_deface_signal counts records, defaced, and skips", {
+  files <- list(
+    list(counts = list(deface = list(defaced = TRUE))),
+    list(counts = list(deface = list(defaced = FALSE, reason = "no-head-fov"))),
+    list(counts = list()))                       # a file that never hit defacing
+  sig <- .acc_deface_signal(files)
+  expect_true(sig$ok)
+  expect_match(sig$detail, "2 deface record\\(s\\), 1 defaced, 0 error")
+})
+
+test_that(".acc_deface_signal handles an empty file list", {
+  sig <- .acc_deface_signal(list())
+  expect_true(sig$ok)
+  expect_match(sig$detail, "0 deface record\\(s\\), 0 defaced, 0 error")
+})
