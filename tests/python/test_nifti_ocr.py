@@ -42,3 +42,20 @@ def test_volume_ocr_boxes_iterates_shortest_axis_and_tags_slice():
     assert calls["planes"] == 2
     assert all(b["axis"] == 0 for b in boxes)
     assert sorted(b["slice"] for b in boxes) == [0, 1]
+
+
+def test_volume_ocr_boxes_skips_a_failing_slice_without_losing_others():
+    vol = np.zeros((3, 6, 6), dtype=np.uint8)
+    calls = {"n": 0}
+    def fake(img, scanner):
+        i = calls["n"]; calls["n"] += 1
+        if i == 1:                       # fail on the middle plane only
+            raise RuntimeError("bad slice")
+        return [{"x": 0, "y": 0, "w": 1, "h": 1, "text": "S1234567", "source": "ocr"}]
+    orig = pixels.image_phi_boxes
+    pixels.image_phi_boxes = fake
+    try:
+        boxes = pixels.volume_ocr_boxes(vol, _StubScanner())
+    finally:
+        pixels.image_phi_boxes = orig
+    assert sorted(b["slice"] for b in boxes) == [0, 2]   # slice 1 failed, others kept

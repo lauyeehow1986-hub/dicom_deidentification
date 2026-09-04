@@ -177,7 +177,11 @@ def volume_ocr_boxes(volume, scanner, axis=None) -> list:
     boxes = []
     for i in range(v.shape[ax]):
         img = _frame_to_uint8(np.take(v, i, axis=ax))
-        for b in image_phi_boxes(img, scanner):
+        try:
+            page_boxes = image_phi_boxes(img, scanner)
+        except Exception:  # noqa: BLE001 - a bad slice must not lose prior boxes
+            continue
+        for b in page_boxes:
             b = dict(b)
             b["slice"] = i
             b["axis"] = ax
@@ -185,7 +189,7 @@ def volume_ocr_boxes(volume, scanner, axis=None) -> list:
     return boxes
 
 
-def redact_volume_boxes(volume, boxes, fill=0):
+def redact_volume_boxes(volume, boxes, fill=0) -> np.ndarray:
     """Zero each box on its slice within a copy of ``volume``; return the copy.
 
     Boxes are ``{x, y, w, h, slice, axis}`` (as from ``volume_ocr_boxes``);
@@ -202,7 +206,6 @@ def redact_volume_boxes(volume, boxes, fill=0):
         x1 = min(w, x0 + int(b["w"])); y1 = min(h, y0 + int(b["h"]))
         if x1 <= x0 or y1 <= y0:
             continue
-        plane = plane.copy()
         plane[y0:y1, x0:x1, ...] = fill
         idx = [slice(None)] * v.ndim
         idx[ax] = i
