@@ -306,18 +306,32 @@ def _is_nifti(path: str) -> bool:
     return any(low.endswith(ext) for ext in _NIFTI_EXTS)
 
 
-def _deidentify_nifti(full: str, out: str) -> dict:
-    """Copy a NIfTI volume through unchanged, blanking header free-text fields.
+# BIDS/dcm2niix JSON sidecar keys whose values seed the header-token scrub of
+# the sidecar's own free-text keys (and the paired volume's filename).
+_JSON_KNOWN_KEYS = (
+    "PatientName", "PatientID", "OtherPatientIDs", "PatientBirthName",
+    "PerformingPhysicianName", "ReferringPhysicianName", "OperatorsName",
+    "AccessionNumber",
+)
+_DATE_VRS = {"DA", "DT", "TM"}
+_DATE_ACTION_BY_MODE = {"remove": "X", "shift": "S", "keep": "K"}
 
-    NIfTI carries no structured patient identifiers; its only free-text PHI
-    surface is the header ``descrip``/``aux_file``/``intent_name`` fields. The
-    image data and affine are preserved exactly ("NIfTI out for NIfTI in").
+
+def _deidentify_nifti(full: str, out: str) -> dict:
+    """Copy a NIfTI volume through unchanged, blanking header PHI surfaces.
+
+    NIfTI carries no structured patient identifiers; its free-text PHI surfaces
+    are the header ``descrip``/``aux_file``/``intent_name`` fields and any header
+    *extensions* (which can embed an entire DICOM dataset or freeform text). Both
+    are removed. The image data and affine are preserved exactly, and the input's
+    NIfTI-1/2 class is kept ("NIfTI out for NIfTI in").
     """
     import nibabel as nib
     import numpy as np
 
     img = nib.load(full)
     hdr = img.header.copy()
+    records = []
     scrubbed = 0
     for field in _NIFTI_TEXT_FIELDS:
         try:
@@ -326,14 +340,218 @@ def _deidentify_nifti(full: str, out: str) -> dict:
             continue
         if cur:
             scrubbed += 1
+            records.append({"tag": 0, "keyword": f"nifti:{field}", "action": "Z",
+                            "original": cur.decode("latin-1", "replace"),
+                            "result": ""})
         hdr[field] = b""
-    out_img = nib.Nifti1Image(
-        np.asanyarray(img.dataobj), img.affine, header=hdr)
+
+    # Strip ALL header extensions: any may embed DICOM (code 2) or freeform PHI.
+    ext_removed = 0
+    try:
+        exts = hdr.extensions
+        ext_removed = len(exts)
+        if ext_removed:
+            del exts[:]
+    except (AttributeError, TypeError):
+        pass
+
+    # type(img) keeps NIfTI-1 as NIfTI-1 and NIfTI-2 as NIfTI-2.
+    out_img = type(img)(np.asanyarray(img.dataobj), img.affine, header=hdr)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     nib.save(out_img, out)
     return {"input": full, "output": out,
-            "counts": {"nifti_header_fields_scrubbed": scrubbed},
-            "records": []}
+            "counts": {"nifti_header_fields_scrubbed": scrubbed,
+                       "nifti_extensions_removed": ext_removed},
+            "records": records}
+
+
+def _is_json_sidecar(path: str) -> bool:
+    return path.lower().endswith(".json")
+
+
+def _basename_stem(name: str) -> str:
+    """Stem of a filename, treating ``.nii.gz`` as one extension."""
+    base = os.path.basename(name)
+    low = base.lower()
+    if low.endswith(".nii.gz"):
+        return base[:-7]
+    return os.path.splitext(base)[0]
+
+
+def _collect_known_values_from_map(d: dict) -> list[str]:
+    """Real identifier values (+ name/id tokens) from a JSON sidecar's ID keys."""
+    vals: set[str] = set()
+    for key in _JSON_KNOWN_KEYS:
+        raw = d.get(key)
+        if raw is None:
+            continue
+        for piece in (raw if isinstance(raw, (list, tuple)) else [raw]):
+            s = str(piece).strip()
+            if not s:
+                continue
+            vals.add(s)
+            for tok in re.split(r"[\^\s]+", s):
+                if len(tok) > 1:
+                    vals.add(tok)
+    return [v for v in vals if v]
+
+
+def _json_key_action(key: str, amap: dict, date_action: str):
+    """Resolve the PS3.15 action for a BIDS key by reusing the DICOM action map
+    (BIDS keys mirror DICOM keywords). Date-VR keys get the profile's date policy
+    even when the specific tag isn't in the catalog. Unknown keys return None
+    (scan their values, keep the key)."""
+    from pydicom.datadict import tag_for_keyword, dictionary_VR
+    try:
+        tag = tag_for_keyword(key)
+    except Exception:
+        tag = None
+    if tag is not None:
+        act = amap.get(int(tag))
+        if act:
+            return act
+        try:
+            if dictionary_VR(int(tag)) in _DATE_VRS:
+                return date_action
+        except Exception:
+            pass
+    return None
+
+
+def _shift_iso_datetime(value: str, offset_days: int):
+    """Shift the date part of an ISO date/datetime by ``offset_days``; keep the
+    time/zone suffix. Returns None when the string isn't ISO-dated."""
+    m = re.match(r"(\d{4})-(\d{2})-(\d{2})(.*)$", value or "")
+    if not m:
+        return None
+    from datetime import date, timedelta
+    try:
+        d = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+    except ValueError:
+        return None
+    return (d + timedelta(days=offset_days)).isoformat() + m.group(4)
+
+
+def _scrub_json_value(val, scanner):
+    """Recursively redact PHI from a JSON value; return (clean, n_redacted)."""
+    if isinstance(val, str):
+        red, spans = scanner.redact(val)
+        return red, len(spans)
+    if isinstance(val, list):
+        out, n = [], 0
+        for v in val:
+            rv, k = _scrub_json_value(v, scanner)
+            out.append(rv)
+            n += k
+        return out, n
+    if isinstance(val, dict):
+        out, n = {}, 0
+        for k, v in val.items():
+            rv, c = _scrub_json_value(v, scanner)
+            out[k] = rv
+            n += c
+        return out, n
+    return val, 0
+
+
+def _shift_json_value(val, offset_days: int, scanner):
+    """Date-shift ISO date strings in a JSON value; fall back to scrubbing."""
+    if isinstance(val, str):
+        sv = _shift_iso_datetime(val, offset_days)
+        if sv is not None:
+            return sv, 1
+        return _scrub_json_value(val, scanner)
+    if isinstance(val, list):
+        out, n = [], 0
+        for v in val:
+            rv, k = _shift_json_value(v, offset_days, scanner)
+            out.append(rv)
+            n += k
+        return out, n
+    return val, 0
+
+
+def _deidentify_json_sidecar(full: str, out: str, scanner, amap: dict,
+                             date_action: str, salt: bytes, lo: int, hi: int) -> dict:
+    """De-identify a dcm2niix/BIDS ``.json`` sidecar in place.
+
+    Identifier keys (via the DICOM action map) are dropped; date keys are shifted
+    or removed per the profile; every remaining string value is run through the
+    text scanner (seeded on the sidecar's own identifiers) so free-text PHI is
+    caught. Non-object JSON is value-scrubbed wholesale.
+    """
+    try:
+        with open(full, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except Exception as e:  # noqa: BLE001 - a malformed sidecar must not lose the run
+        return {"input": full, "output": None, "skipped": f"not valid JSON: {e}"}
+
+    os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
+    if not isinstance(data, dict):
+        cleaned, n = _scrub_json_value(data, scanner)
+        with open(out, "w", encoding="utf-8") as fh:
+            json.dump(cleaned, fh, indent=2, ensure_ascii=False)
+        return {"input": full, "output": out,
+                "counts": {"json_values_scrubbed": n}, "records": []}
+
+    scanner.set_known_values(_collect_known_values_from_map(data))
+    patient_key = str(data.get("PatientID", "") or data.get("PatientName", ""))
+    offset = _ps.date_offset_days(patient_key, salt, int(lo), int(hi))
+
+    cleaned: dict = {}
+    removed = scrubbed = shifted = 0
+    for key, val in data.items():
+        act = _json_key_action(key, amap, date_action)
+        if act in ("X", "Z", "D", "H", "U"):
+            removed += 1
+            continue
+        if act == "S":
+            nv, n = _shift_json_value(val, offset, scanner)
+            cleaned[key] = nv
+            shifted += n
+            continue
+        if act == "K":
+            cleaned[key] = val
+            continue
+        nv, n = _scrub_json_value(val, scanner)
+        cleaned[key] = nv
+        scrubbed += n
+
+    with open(out, "w", encoding="utf-8") as fh:
+        json.dump(cleaned, fh, indent=2, ensure_ascii=False)
+    return {"input": full, "output": out,
+            "counts": {"json_keys_removed": removed,
+                       "json_values_scrubbed": scrubbed,
+                       "json_dates_shifted": shifted}, "records": []}
+
+
+def _sanitise_basename(name: str, scanner, salt: bytes, truncate: int) -> str:
+    """Replace whole identifier tokens (names/IDs/NRIC/phone) in a filename with a
+    stable pseudonym, preserving separators and the (``.nii.gz``-aware) extension.
+    Free-form concatenations that don't tokenise are left as-is (can't be edited
+    safely without breaking references)."""
+    base = os.path.basename(name)
+    low = base.lower()
+    if low.endswith(".nii.gz"):
+        stem, ext = base[:-7], base[-7:]
+    else:
+        stem, ext = os.path.splitext(base)
+    parts = re.split(r"([_\-.\s]+)", stem)
+    out = []
+    for p in parts:
+        if not p or re.fullmatch(r"[_\-.\s]+", p):
+            out.append(p)
+            continue
+        spans = scanner.scan(p)
+        if spans and any((s.end - s.start) >= len(p) for s in spans):
+            out.append(_ps.salted_sha256(p, salt, truncate))
+        elif spans:
+            red, _ = scanner.redact(
+                p, replacement=lambda s: _ps.salted_sha256(s.text, salt, truncate))
+            out.append(red)
+        else:
+            out.append(p)
+    return "".join(out) + ext
 
 
 def _pixel_autoredact_enabled(profile: dict) -> bool:
@@ -366,11 +584,52 @@ def deidentify_study(input_path: str, output_path: str, profile: dict, keystore)
     # single time and are reused across every file in the batch.
     td = profile.get("text_detection") or {}
     scanner = _build_scanner(td, []) if td.get("enabled", True) else None
+    # A deterministic scanner (no Presidio/NER) for JSON sidecars and filename
+    # scrubbing even when the profile disables the optional text layers.
+    aux_scanner = scanner if scanner is not None else _build_scanner(
+        {**td, "use_presidio": False, "use_ner": False}, [])
+
+    # NIfTI/JSON support: the action map, date policy, and a pre-pass mapping each
+    # basename stem to the identifiers in its paired sidecar, so a volume's
+    # filename can be sanitised from the sidecar that names its patient.
+    _catalog = _rules.load_catalog()
+    amap = _rules.build_action_map(_catalog, profile)
+    date_mode = (profile.get("dates") or {}).get("mode", "remove")
+    date_action = _DATE_ACTION_BY_MODE.get(date_mode, "X")
+    truncate = int((profile.get("pseudonym") or {}).get("hash_truncate", 16))
+    lo, hi = ((profile.get("dates") or {}).get("offset_days_range") or [-365, 365])[:2]
+    sidecar_known: dict[str, list] = {}
+    if not single_file:
+        for jf, jrel in _iter_input_files(input_path):
+            if not _is_json_sidecar(jf):
+                continue
+            try:
+                with open(jf, encoding="utf-8") as fh:
+                    jd = json.load(fh)
+                if isinstance(jd, dict):
+                    sidecar_known[_basename_stem(jrel)] = \
+                        _collect_known_values_from_map(jd)
+            except Exception:  # noqa: BLE001 - a bad sidecar just yields no seeds
+                pass
+
+    def _sanitised_out(out_path, rel_path, known):
+        """Rename a folder-mode output basename if it carries identifier tokens."""
+        if single_file:
+            return out_path
+        aux_scanner.set_known_values(known or [])
+        new_base = _sanitise_basename(rel_path, aux_scanner, salt, truncate)
+        return os.path.join(os.path.dirname(out_path), new_base)
 
     for full, rel in _iter_input_files(input_path):
         out = output_path if single_file else os.path.join(output_path, rel)
         if _is_nifti(full):
+            out = _sanitised_out(out, rel, sidecar_known.get(_basename_stem(rel)))
             files_report.append(_deidentify_nifti(full, out))
+            continue
+        if _is_json_sidecar(full):
+            out = _sanitised_out(out, rel, sidecar_known.get(_basename_stem(rel)))
+            files_report.append(_deidentify_json_sidecar(
+                full, out, aux_scanner, amap, date_action, salt, lo, hi))
             continue
         try:
             ds = pydicom.dcmread(full)

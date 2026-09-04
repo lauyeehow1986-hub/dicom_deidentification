@@ -15,6 +15,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 
 import numpy as np
 import pydicom
@@ -52,7 +53,7 @@ PLANTED = {
         "nested_sequence": True,
     },
     "encodings": ["single_frame", "multiframe_cine", "rgb", "jpeg2000", "nifti",
-                  "encapsulated_pdf"],
+                  "nifti2", "nifti_pair", "bids_sidecar", "encapsulated_pdf"],
 }
 
 _SC_SOP = "1.2.840.10008.5.1.4.1.1.7"       # Secondary Capture Image Storage
@@ -207,16 +208,50 @@ def build_corpus(out_dir: str) -> dict:
                      "transfer_syntax": str(ds.file_meta.TransferSyntaxUID),
                      "burned_in": True})
 
-    # 5. NIfTI (planted name in the header description) -------------------------
+    # 5. NIfTI (planted name in the header description + PHI in a header
+    #    extension, which can embed a whole DICOM dataset or freeform text) -------
     import nibabel as nib
 
     vol = (np.arange(8 * 8 * 4, dtype=np.float32).reshape(8, 8, 4) % 97)
     img = nib.Nifti1Image(vol, affine=np.eye(4))
     img.header["descrip"] = PLANTED["names"][4].encode("ascii", "replace")[:80]
+    img.header.extensions.append(
+        nib.nifti1.Nifti1Extension(6, PLANTED["mrn"][0].encode("ascii")))
     rel = "volume.nii.gz"
     nib.save(img, os.path.join(out_dir, rel))
     fixtures.append({"rel": rel, "encoding": "nifti",
                      "transfer_syntax": "nifti-1", "burned_in": False})
+
+    # 5b. NIfTI-2 (must round-trip as NIfTI-2, not be downcast to NIfTI-1) -------
+    vol2 = np.ones((6, 6, 3), dtype=np.int16)
+    img2 = nib.Nifti2Image(vol2, affine=np.eye(4))
+    img2.header["descrip"] = PLANTED["names"][3].encode("ascii", "replace")[:80]
+    rel = "volume_v2.nii"
+    nib.save(img2, os.path.join(out_dir, rel))
+    fixtures.append({"rel": rel, "encoding": "nifti2",
+                     "transfer_syntax": "nifti-2", "burned_in": False})
+
+    # 5c. dcm2niix/BIDS pair: a volume + JSON sidecar, with identifier tokens in
+    #     the shared filename (name tokens + NRIC) and PHI keys in the sidecar. ---
+    stem = "Ramasamy_Muthu_" + PLANTED["nric_fin"][0]
+    vol3 = np.zeros((5, 5, 2), dtype=np.int16)
+    nib.save(nib.Nifti1Image(vol3, np.eye(4)),
+             os.path.join(out_dir, stem + ".nii.gz"))
+    sidecar = {
+        "PatientName": PLANTED["names"][2],                 # Ramasamy Muthu
+        "PatientID": PLANTED["nric_fin"][0],                # S1234567D
+        "AcquisitionDateTime": "2024-05-01T13:45:00",
+        "InstitutionName": "Some Hospital",
+        "SeriesDescription": "Cardiac MR for " + PLANTED["names"][2],
+        "MagneticFieldStrength": 3.0,
+    }
+    with open(os.path.join(out_dir, stem + ".json"), "w", encoding="utf-8") as fh:
+        json.dump(sidecar, fh, indent=2)
+    fixtures.append({"rel": stem + ".nii.gz", "encoding": "nifti_pair",
+                     "transfer_syntax": "nifti-1", "burned_in": False,
+                     "phi_filename": True})
+    fixtures.append({"rel": stem + ".json", "encoding": "bids_sidecar",
+                     "sidecar": True, "phi_filename": True})
 
     # 6. Encapsulated PDF (embedded report with a planted visible name) ---------
     _ENCAPS_PDF_SOP = "1.2.840.10008.5.1.4.1.1.104.1"
@@ -315,6 +350,22 @@ def check_survivors(out_dir: str, planted: dict | None = None) -> dict:
                 text = " ".join(
                     bytes(hdr[f]).split(b"\x00", 1)[0].decode("latin-1", "replace")
                     for f in _NIFTI_TEXT_FIELDS)
+                # header extensions can smuggle an embedded DICOM / freeform PHI
+                try:
+                    for ext in hdr.extensions:
+                        raw = ext.get_content()
+                        text += " " + (raw.decode("latin-1", "replace")
+                                       if isinstance(raw, (bytes, bytearray))
+                                       else str(raw))
+                except Exception:  # noqa: BLE001
+                    pass
+            elif low.endswith(".json"):
+                # a de-identified BIDS/dcm2niix sidecar - scan its full text
+                try:
+                    with open(full, encoding="utf-8") as fh:
+                        text = fh.read()
+                except Exception:  # noqa: BLE001
+                    continue
             else:
                 try:
                     ds = pydicom.dcmread(full, force=True)
@@ -323,7 +374,10 @@ def check_survivors(out_dir: str, planted: dict | None = None) -> dict:
                 text = _element_text(ds)
                 text += " " + _encapsulated_pdf_text(ds)
             n_files += 1
-            norm = text.replace("^", " ").replace("=", " ")
+            # the filename itself can carry identifier tokens; normalise its
+            # separators so "Tan_Wei_Ming" is caught like "Tan Wei Ming".
+            fname_norm = re.sub(r"[_\-.]+", " ", fn)
+            norm = (text + " " + fname_norm).replace("^", " ").replace("=", " ")
             for cat in _LITERAL_CATS:
                 for val in planted.get(cat, []):
                     if val and val in norm:

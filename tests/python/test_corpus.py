@@ -39,7 +39,13 @@ def test_dicom_fixtures_are_valid_and_readback(tmp_path):
     out = tmp_path / "synthetic"
     man = corpus.build_corpus(str(out))
     for f in man["fixtures"]:
-        if f["encoding"] == "nifti":
+        if f.get("sidecar") or f["rel"].endswith(".json"):
+            # a BIDS/dcm2niix JSON sidecar - valid JSON object, not a DICOM file
+            import json as _json
+            with open(out / f["rel"], encoding="utf-8") as fh:
+                assert isinstance(_json.load(fh), dict)
+            continue
+        if f["encoding"] in ("nifti", "nifti2", "nifti_pair"):
             img = nib.load(str(out / f["rel"]))
             assert img.get_fdata().size > 0
             continue

@@ -142,6 +142,10 @@ acceptance_run <- function(work_dir = tempfile("acc_"),
 
   man <- engine_build_corpus(corpus_dir)
   n_inputs <- length(man$fixtures)
+  # Completeness is measured against actual input FILES (the corpus also writes a
+  # ground-truth manifest, and de-id now processes JSON sidecars), so a silently
+  # dropped file is still caught. `n_inputs` (fixtures) stays for the report meta.
+  n_input_files <- length(list.files(corpus_dir, recursive = TRUE))
 
   # Auto-apply burned-in-pixel redaction for the acceptance run (simulating a
   # reviewer confirming every OCR-proposed box), so the residual scan validates
@@ -155,11 +159,15 @@ acceptance_run <- function(work_dir = tempfile("acc_"),
   outputs <- Filter(nzchar, vapply(rep$files, function(f) f$output %||% "",
                                    character(1)))
 
-  # validity: non-NIfTI outputs must re-read as valid headers; NIfTI must exist
+  # validity: DICOM outputs must re-read as valid headers; NIfTI + de-identified
+  # JSON sidecars must exist and (for JSON) parse.
   invalid <- character(0)
   for (o in outputs) {
     if (grepl("[.]nii([.]gz)?$", o, ignore.case = TRUE)) {
       if (!file.exists(o) || file.size(o) == 0) invalid <- c(invalid, o)
+    } else if (grepl("[.]json$", o, ignore.case = TRUE)) {
+      ok <- tryCatch({ jsonlite::fromJSON(o); TRUE }, error = function(e) FALSE)
+      if (!ok) invalid <- c(invalid, o)
     } else {
       ok <- tryCatch({ md <- engine_read_metadata(o, profile_id); length(md$rows) > 0 },
                      error = function(e) FALSE)
@@ -190,7 +198,7 @@ acceptance_run <- function(work_dir = tempfile("acc_"),
                           error = function(e) NA_integer_)
 
   raw <- list(
-    deid = list(count = rep$count %||% length(outputs), n_inputs = n_inputs),
+    deid = list(count = rep$count %||% length(outputs), n_inputs = n_input_files),
     survivors = survivors,
     residual = list(passed = isTRUE(scan$passed),
                     summary = scan$summary, by_category = scan$by_category),
