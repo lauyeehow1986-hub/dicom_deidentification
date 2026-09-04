@@ -1201,7 +1201,10 @@ def _scan_residual_nifti(path: str, scanner, scan_pixels: bool, min_score: float
         "by_category": by_category,
         "counts": {"total": len(findings), "metadata": n_meta, "pixels": n_pixels},
         "passed": passed,
-        "identity_removed": True,   # NIfTI has no PatientIdentityRemoved tag
+        # NIfTI has no PatientIdentityRemoved tag, and this scan runs independently
+        # of the de-id step, so it cannot attest that identity was removed. Report
+        # None (rendered as "n/a" on the R side) rather than falsely asserting True.
+        "identity_removed": None,
         "notes": notes,
     }
 

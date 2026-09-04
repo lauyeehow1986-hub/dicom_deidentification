@@ -62,7 +62,10 @@ qa_files_df <- function(results) {
       File = basename(r$path %||% ""),
       Findings = .as_int((r$counts %||% list())$total),
       Categories = if (length(cats)) paste(cats, collapse = ", ") else "",
-      IdentityRemoved = if (isTRUE(r$identity_removed)) "yes" else "NO",
+      IdentityRemoved = if (is.null(r$identity_removed) ||
+                            (length(r$identity_removed) == 1 && is.na(r$identity_removed))) {
+        "n/a"    # NIfTI: residual scan can't attest identity removal (no PatientIdentityRemoved tag)
+      } else if (isTRUE(r$identity_removed)) "yes" else "NO",
       Verdict = if (isTRUE(r$passed)) "PASS" else "FLAG",
       stringsAsFactors = FALSE
     )
