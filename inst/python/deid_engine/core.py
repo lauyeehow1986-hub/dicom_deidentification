@@ -317,14 +317,15 @@ _DATE_VRS = {"DA", "DT", "TM"}
 _DATE_ACTION_BY_MODE = {"remove": "X", "shift": "S", "keep": "K"}
 
 
-def _deidentify_nifti(full: str, out: str) -> dict:
-    """Copy a NIfTI volume through unchanged, blanking header PHI surfaces.
+def _deidentify_nifti(full: str, out: str, profile: dict | None = None,
+                      scanner=None, ocr_autoredact: bool = False) -> dict:
+    """Copy a NIfTI volume through, blanking header PHI surfaces, and (when the
+    profile turns pixel cleaning on) OCR-scanning its slices for burned-in text.
 
-    NIfTI carries no structured patient identifiers; its free-text PHI surfaces
-    are the header ``descrip``/``aux_file``/``intent_name`` fields and any header
-    *extensions* (which can embed an entire DICOM dataset or freeform text). Both
-    are removed. The image data and affine are preserved exactly, and the input's
-    NIfTI-1/2 class is kept ("NIfTI out for NIfTI in").
+    Header text fields + all extensions are removed; the NIfTI-1/2 class is kept.
+    Burned-in-text OCR reuses the DICOM OCR layer: with ``ocr_autoredact`` the
+    detected PHI boxes are zeroed; otherwise they are recorded for reviewer
+    confirmation. The image data is otherwise preserved exactly.
     """
     import nibabel as nib
     import numpy as np
@@ -355,14 +356,34 @@ def _deidentify_nifti(full: str, out: str) -> dict:
     except (AttributeError, TypeError):
         pass
 
+    data = np.asanyarray(img.dataobj)
+    counts = {"nifti_header_fields_scrubbed": scrubbed,
+              "nifti_extensions_removed": ext_removed}
+
+    # Burned-in-text OCR (optional; degrades like the DICOM pixel layer).
+    clean_pixels = bool((profile or {}).get("options", {}).get("clean_pixel_data", True))
+    if clean_pixels and scanner is not None and data.ndim == 3:
+        ok, note = _pixels._ocr_available()
+        if not ok:
+            counts["nifti_ocr_note"] = note
+        else:
+            try:
+                boxes = _pixels.volume_ocr_boxes(data, scanner)
+                counts["nifti_ocr_boxes"] = len(boxes)
+                if boxes and ocr_autoredact:
+                    data = _pixels.redact_volume_boxes(data, boxes, fill=0)
+                    counts["nifti_pixels_redacted"] = len(boxes)
+            except Exception as e:  # noqa: BLE001 - pixel step must not lose the file
+                counts["nifti_ocr_error"] = str(e)
+
     # type(img) keeps NIfTI-1 as NIfTI-1 and NIfTI-2 as NIfTI-2.
-    out_img = type(img)(np.asanyarray(img.dataobj), img.affine, header=hdr)
+    out_img = type(img)(np.ascontiguousarray(data), img.affine, header=hdr)
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     nib.save(out_img, out)
-    return {"input": full, "output": out,
-            "counts": {"nifti_header_fields_scrubbed": scrubbed,
-                       "nifti_extensions_removed": ext_removed},
-            "records": records}
+    # nib.save appends the class's default extension when `out` lacks one
+    # nibabel recognises (e.g. "out" -> "out.nii"); report the real path.
+    saved_as = out_img.get_filename() or out
+    return {"input": full, "output": saved_as, "counts": counts, "records": records}
 
 
 def _is_json_sidecar(path: str) -> bool:
@@ -624,7 +645,9 @@ def deidentify_study(input_path: str, output_path: str, profile: dict, keystore)
         out = output_path if single_file else os.path.join(output_path, rel)
         if _is_nifti(full):
             out = _sanitised_out(out, rel, sidecar_known.get(_basename_stem(rel)))
-            files_report.append(_deidentify_nifti(full, out))
+            files_report.append(_deidentify_nifti(
+                full, out, profile=profile, scanner=scanner,
+                ocr_autoredact=_pixel_autoredact_enabled(profile)))
             continue
         if _is_json_sidecar(full):
             out = _sanitised_out(out, rel, sidecar_known.get(_basename_stem(rel)))

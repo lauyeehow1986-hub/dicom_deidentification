@@ -59,3 +59,50 @@ def test_volume_ocr_boxes_skips_a_failing_slice_without_losing_others():
     finally:
         pixels.image_phi_boxes = orig
     assert sorted(b["slice"] for b in boxes) == [0, 2]   # slice 1 failed, others kept
+
+
+# add to tests/python/test_nifti_ocr.py
+import nibabel as nib
+from deid_engine import core, keystore, pixels as _pixels
+
+
+def test_nifti_burned_in_text_is_redacted_when_autoredact(tmp_path, monkeypatch):
+    # A volume whose one slice "contains" burned-in PHI. We stub OCR so the test
+    # needs no Tesseract: pretend a fixed box on slice 0 reads an NRIC.
+    vol = np.ones((2, 10, 10), dtype=np.int16) * 50
+    nib.save(nib.Nifti1Image(vol, np.eye(4)), str(tmp_path / "v.nii.gz"))
+    out = tmp_path / "out"
+
+    monkeypatch.setattr(_pixels, "_ocr_available", lambda: (True, ""))
+    monkeypatch.setattr(_pixels, "image_phi_boxes",
+                        lambda img, scanner: [{"x": 1, "y": 1, "w": 4, "h": 3,
+                                               "text": "S1234567D", "source": "ocr"}]
+                        if img.shape == (10, 10) else [])
+
+    prof = dict(core.profile_get("default"))
+    # force auto-redact (as bulk/acceptance does)
+    prof["pixel"] = {**(prof.get("pixel") or {}), "auto_detect": True,
+                     "require_human_confirm": False}
+    prof["options"] = {**(prof.get("options") or {}), "clean_pixel_data": True}
+
+    ks = keystore.ephemeral()
+    report = core.deidentify_study(str(tmp_path / "v.nii.gz"), str(out), prof, ks)
+    rec = report["files"][0]
+    assert rec["counts"].get("nifti_ocr_boxes", 0) >= 1
+    assert rec["counts"].get("nifti_pixels_redacted", 0) >= 1
+    got = nib.load(rec["output"]).get_fdata()
+    # the box on both scanned planes (shortest axis is 0, size 2) is zeroed
+    assert got[0, 1:4, 1:5].sum() == 0
+
+
+def test_nifti_ocr_degrades_without_tesseract(tmp_path, monkeypatch):
+    vol = np.ones((2, 6, 6), dtype=np.int16)
+    nib.save(nib.Nifti1Image(vol, np.eye(4)), str(tmp_path / "v.nii.gz"))
+    out = tmp_path / "out"
+    monkeypatch.setattr(_pixels, "_ocr_available", lambda: (False, "no tesseract"))
+    prof = core.profile_get("default")
+    ks = keystore.ephemeral()
+    report = core.deidentify_study(str(tmp_path / "v.nii.gz"), str(out), prof, ks)
+    rec = report["files"][0]
+    assert rec["counts"].get("nifti_ocr_note")           # noted, not fatal
+    assert nib.load(rec["output"]) is not None            # file still written
