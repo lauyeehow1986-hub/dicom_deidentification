@@ -84,3 +84,36 @@ test_that("report renders markdown with an overall verdict and a row per check",
   expect_true(grepl("FAIL", md2))
   expect_true(grepl("patient@example.sg", md2))
 })
+
+test_that("acceptance_checks grades the deface signal", {
+  raw <- list(
+    deface = list(ok = TRUE, detail = "1 head-MR volume defaced"),
+    deid = list(count = 1L, n_inputs = 1L),
+    survivors = list(passed = TRUE, metadata_survivors = list()),
+    residual = list(passed = TRUE, summary = list(flagged = 0L, scanned = 1L),
+                    by_category = list()),
+    validity = list(ok = TRUE, invalid = character(0)),
+    reversibility = list(mode = "reversible", roundtrip_ok = TRUE,
+                         crosswalk_present = TRUE),
+    resume = list(reprocessed = 0L))
+  rep <- acceptance_checks(raw)
+  expect_true("defacing applied or gracefully skipped" %in% rep$checks$name)
+  expect_true(rep$passed)
+})
+
+test_that("acceptance_checks fails deface when a deface_error occurred", {
+  raw <- list(
+    deface = list(ok = FALSE, detail = "1 deface record(s), 0 defaced, 1 error(s)"),
+    deid = list(count = 1L, n_inputs = 1L),
+    survivors = list(passed = TRUE, metadata_survivors = list()),
+    residual = list(passed = TRUE, summary = list(flagged = 0L, scanned = 1L),
+                    by_category = list()),
+    validity = list(ok = TRUE, invalid = character(0)),
+    reversibility = list(mode = "reversible", roundtrip_ok = TRUE,
+                         crosswalk_present = TRUE),
+    resume = list(reprocessed = 0L))
+  rep <- acceptance_checks(raw)
+  row <- rep$checks[rep$checks$name == "defacing applied or gracefully skipped", ]
+  expect_false(row$passed)
+  expect_false(rep$passed)
+})
