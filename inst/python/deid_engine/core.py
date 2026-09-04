@@ -717,6 +717,27 @@ def deidentify_study(input_path: str, output_path: str, profile: dict, keystore)
             except Exception as e:  # noqa: BLE001 - pixel step must not lose the file
                 counts["pixel_redact_error"] = str(e)
 
+        # Optional ML defacing of a head-inclusive MR *volume* object (multiframe
+        # grayscale = a whole 3-D volume in one file). Single-instance-per-slice
+        # series (a 3-D face across many files) is out of scope. Degrades when the
+        # model is absent; never fatal to the metadata de-id already done.
+        if _deface_enabled(profile) and "PixelData" in ds:
+            try:
+                modality = str(getattr(ds, "Modality", "") or "")
+                if bool(ds.file_meta.TransferSyntaxUID.is_compressed):
+                    ds.decompress()
+                frames = _pixels.load_frames(ds)  # (N,H,W) or (N,H,W,C)
+                if frames.ndim == 3 and frames.shape[0] > 1:
+                    new, dinfo = _deface.deface_array(frames, modality=modality)
+                    if dinfo.get("defaced"):
+                        _pixels._store_frames(ds, new)
+                    counts["deface"] = dinfo
+                else:
+                    counts["deface"] = {"defaced": False,
+                                        "reason": "not-a-multiframe-grayscale-volume"}
+            except Exception as e:  # noqa: BLE001 - deface must not lose the file
+                counts["deface_error"] = str(e)
+
         # Opt-in encapsulated-PDF redaction: rasterize + OCR-redact + flatten, or
         # (Tesseract absent) fall back to removal. Seed the scanner on the study's
         # ORIGINAL identifiers so the patient's real name is caught in the PDF.

@@ -1,6 +1,9 @@
 # tests/python/test_deface.py
 import numpy as np
 import nibabel as nib
+import pydicom
+from pydicom.dataset import Dataset, FileMetaDataset
+from pydicom.uid import ExplicitVRLittleEndian, MRImageStorage, generate_uid
 from deid_engine import core
 from deid_engine import deface
 from deid_engine import keystore
@@ -177,3 +180,44 @@ def test_nifti_not_defaced_when_disabled(tmp_path, monkeypatch):
     ks = keystore.ephemeral()
     core.deidentify_study(str(tmp_path / "head.nii.gz"), str(out), prof, ks)
     assert called["n"] == 0
+
+
+def _multiframe_mr(path, frames=20, hw=40):
+    ds = Dataset()
+    ds.file_meta = FileMetaDataset()
+    ds.file_meta.TransferSyntaxUID = ExplicitVRLittleEndian
+    ds.file_meta.MediaStorageSOPClassUID = MRImageStorage
+    ds.file_meta.MediaStorageSOPInstanceUID = generate_uid()
+    ds.SOPClassUID = MRImageStorage
+    ds.SOPInstanceUID = ds.file_meta.MediaStorageSOPInstanceUID
+    ds.Modality = "MR"
+    ds.Rows = hw; ds.Columns = hw; ds.NumberOfFrames = frames
+    ds.SamplesPerPixel = 1; ds.PhotometricInterpretation = "MONOCHROME2"
+    ds.BitsAllocated = 16; ds.BitsStored = 16; ds.HighBit = 15
+    ds.PixelRepresentation = 0
+    arr = (np.ones((frames, hw, hw), dtype=np.uint16) * 500)
+    ds.PixelData = arr.tobytes()
+    ds.is_little_endian = True; ds.is_implicit_VR = False
+    ds.save_as(path, write_like_original=False)
+
+
+def test_dicom_multiframe_mr_defaced_when_enabled(tmp_path, monkeypatch):
+    p = tmp_path / "mf.dcm"
+    _multiframe_mr(str(p))
+    out = tmp_path / "out.dcm"
+
+    seen = {"mod": None}
+    def fake_deface(array, modality=None, model=None, margin=2):
+        seen["mod"] = modality
+        a = np.asarray(array).copy(); a[:, :5, :] = 0
+        return a, {"defaced": True, "voxels_removed": 1}
+    monkeypatch.setattr(core._deface, "deface_array", fake_deface)
+
+    prof = dict(core.profile_get("default")); prof["deface"] = {"enabled": True}
+    ks = keystore.ephemeral()
+    report = core.deidentify_study(str(p), str(out), prof, ks)
+    rec = report["files"][0]
+    assert seen["mod"] == "MR"                       # DICOM Modality passed through
+    assert rec["counts"]["deface"]["defaced"] is True
+    got = pydicom.dcmread(str(out)).pixel_array
+    assert got[:, :5, :].sum() == 0
