@@ -69,6 +69,15 @@ def test_deface_available_false_without_weights(monkeypatch, tmp_path):
     assert ok is False and "unavailable" in note
 
 
+def test_dilate_does_not_wrap_across_edges():
+    m = np.zeros((3, 5, 5), dtype=bool)
+    m[1, 0, 2] = True                     # a voxel on the y=0 face
+    d = deface._dilate(m, 1)
+    assert d[1, 1, 2]                     # grows to the true in-bounds neighbour
+    assert not d[1, -1, 2]                # must NOT wrap to the opposite face
+    assert not d[1, 0, -1]                # nor wrap along the x axis
+
+
 def _face_model(vol):
     """Stub model: 'face' = the anterior quarter (low-y rows) of foreground."""
     a = np.asarray(vol)
@@ -84,8 +93,10 @@ def test_deface_array_zeros_face_keeps_brain_with_stub_model():
     out, info = deface.deface_array(vol, modality="MR", model=_face_model, margin=1)
     assert info["defaced"] is True
     assert info["voxels_removed"] > 0
-    # anterior face region erased, posterior (brain) region preserved
-    assert out[:, : vol.shape[1] // 8, :].sum() == 0
+    # the stub's face window (rows 0..h//4) genuinely HAD signal, and is now erased
+    face_window = slice(None), slice(None, vol.shape[1] // 4), slice(None)
+    assert vol[face_window].sum() > 0            # non-vacuous: the region had voxels
+    assert out[face_window].sum() == 0           # ...and defacing zeroed all of it
     assert out[:, vol.shape[1] // 2:, :].sum() == brain_before
 
 

@@ -85,13 +85,23 @@ def is_head_inclusive(array, min_axial: int = 16) -> bool:
 
 
 def _dilate(mask, iters: int):
-    """Pure-numpy 6-neighbour binary dilation (avoids a scipy dependency)."""
+    """Pure-numpy 6-neighbour binary dilation with NON-wrapping (zero-filled)
+    borders, so an erasure mask never bleeds across opposite faces of the volume
+    (which would move erasure onto brain-adjacent tissue). Avoids a scipy dep."""
     m = np.asarray(mask, dtype=bool)
     for _ in range(int(iters)):
         d = m.copy()
         for ax in range(m.ndim):
-            d |= np.roll(m, 1, axis=ax)
-            d |= np.roll(m, -1, axis=ax)
+            for shift in (1, -1):
+                s = np.zeros_like(m)
+                src = [slice(None)] * m.ndim
+                dst = [slice(None)] * m.ndim
+                if shift == 1:
+                    dst[ax] = slice(1, None); src[ax] = slice(None, -1)
+                else:
+                    dst[ax] = slice(None, -1); src[ax] = slice(1, None)
+                s[tuple(dst)] = m[tuple(src)]
+                d |= s
         m = d
     return m
 
