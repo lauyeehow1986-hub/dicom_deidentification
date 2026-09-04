@@ -599,6 +599,11 @@ def _pixel_autoredact_enabled(profile: dict) -> bool:
             and not bool(px.get("require_human_confirm", True)))
 
 
+def _deface_enabled(profile: dict) -> bool:
+    """True when the profile opts into ML defacing for this run (off by default)."""
+    return bool((profile.get("deface") or {}).get("enabled"))
+
+
 def deidentify_study(input_path: str, output_path: str, profile: dict, keystore) -> dict:
     """De-identify one DICOM file or a folder of them; write valid DICOM out.
 
@@ -758,7 +763,8 @@ def deid_run(input_path: str, output_path: str, profile_id: str = "default",
              reversible: bool = True, sign_key_path: str | None = None,
              signer: str | None = None, project_id: str | None = None,
              autoredact_pixels: bool = False,
-             pdf_mode: str | None = None, pdf_dpi: int | None = None) -> dict:
+             pdf_mode: str | None = None, pdf_dpi: int | None = None,
+             deface: bool = False) -> dict:
     """High-level entry used by the R UI.
 
     Loads the named profile, opens/creates a keystore (persisting the salt so
@@ -776,6 +782,10 @@ def deid_run(input_path: str, output_path: str, profile_id: str = "default",
     (mode/dpi) for this run only; ``None`` (the default) leaves the profile's
     setting untouched. As with ``autoredact_pixels``, the shipped profile object
     is never mutated - only a local copy.
+
+    ``deface`` turns on ML defacing of head-inclusive MR volumes for this run
+    only (default off). As with the overrides above, the shipped profile object
+    is never mutated - only a local copy.
     """
     profile = profile_get(profile_id)
     if autoredact_pixels:
@@ -792,6 +802,9 @@ def deid_run(input_path: str, output_path: str, profile_id: str = "default",
         if pdf_dpi is not None:
             ep["dpi"] = int(pdf_dpi)
         profile["encapsulated_pdf"] = ep
+    if deface:
+        profile = dict(profile)
+        profile["deface"] = {**(profile.get("deface") or {}), "enabled": True}
     if keystore_path:
         if os.path.exists(keystore_path):
             ks_obj = _keystore.open(keystore_path, passphrase)

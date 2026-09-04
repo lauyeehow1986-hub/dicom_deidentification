@@ -120,3 +120,26 @@ def test_deface_array_degrades_without_model(monkeypatch):
     out, info = deface.deface_array(vol, modality="MR", model=None)
     assert info["defaced"] is False and "no weights" in info["note"]
     assert np.array_equal(out, vol)
+
+
+# add to tests/python/test_deface.py
+from deid_engine import core
+
+
+def test_deface_enabled_reads_profile():
+    assert core._deface_enabled({"deface": {"enabled": True}}) is True
+    assert core._deface_enabled({"deface": {"enabled": False}}) is False
+    assert core._deface_enabled({}) is False
+
+
+def test_deid_run_deface_flag_turns_on_profile(tmp_path, monkeypatch):
+    # Capture the profile deidentify_study receives to prove the flag threads in.
+    seen = {}
+
+    def _capture(ip, op, profile, ks):
+        seen["p"] = profile
+        return {"files": [], "count": 0}
+
+    monkeypatch.setattr(core, "deidentify_study", _capture)
+    core.deid_run(str(tmp_path), str(tmp_path / "o"), deface=True)
+    assert seen["p"]["deface"]["enabled"] is True

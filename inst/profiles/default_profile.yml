@@ -59,6 +59,15 @@ pixel:
   fill: black
   strip_audio: true
 
+# --- defacing (optional, MRI only, OFF by default) ----------------------------
+#   Erases the facial biometric surface from head-inclusive MR volumes.
+#   DESTRUCTIVE (zeroes voxels). Enable per-run in the interactive/bulk flow.
+#   FOV-gated: chest-only cardiac scans pass through untouched. MR-only:
+#   head-inclusive CT is flagged for manual handling, not defaced. Needs the
+#   bundled CPU model under inst/models/deface/; absent -> skipped + noted.
+deface:
+  enabled: false
+
 # --- Embedded-PDF (EncapsulatedDocument) handling -------------------------------
 #   remove          - strip the whole embedded PDF (default, safe, no OCR needed)
 #   rasterize_redact - render pages, OCR-redact PHI, flatten to an image-only PDF
