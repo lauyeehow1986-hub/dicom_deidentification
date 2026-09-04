@@ -8,7 +8,7 @@ from PIL import Image, ImageDraw
 from pydicom.dataset import Dataset, FileMetaDataset
 from pydicom.uid import ExplicitVRLittleEndian, generate_uid
 
-from deid_engine import corpus, documents
+from deid_engine import corpus, documents, pixels
 
 ENCAPS_PDF_SOP = "1.2.840.10008.5.1.4.1.1.104.1"
 
@@ -47,15 +47,34 @@ def test_corpus_emits_encapsulated_pdf_fixture(tmp_path):
     assert "EncapsulatedDocument" in ds
 
 
-def test_check_survivors_clean_on_flattened_pdf(tmp_path):
-    # A flattened (redacted) image PDF has no recoverable text -> no survivors,
-    # and no false positive from the embedded-PDF inspection path.
-    name = corpus.PLANTED["names"][1]
-    flat = documents.flatten_to_pdf(documents.render_pdf_pages(_pdf_with_name(name), dpi=100))
+def test_check_survivors_clean_on_phi_free_pdf(tmp_path):
+    # A PDF carrying no planted PHI must not be flagged -- neither via its (empty)
+    # text layer nor via OCR of the rendered page. Guards against false positives
+    # whether or not Tesseract is present. (Note: flattening removes the TEXT
+    # layer but NOT the visible ink, so a *visible* name would still be caught by
+    # OCR -- see test_check_survivors_catches_visible_name_via_ocr.)
+    flat = documents.flatten_to_pdf(
+        documents.render_pdf_pages(_pdf_with_name("cardiac ultrasound report page"),
+                                   dpi=100))
     ds = _encaps_ds_with(flat)
     pydicom.dcmwrite(str(tmp_path / "doc.dcm"), ds, enforce_file_format=True)
     res = corpus.check_survivors(str(tmp_path))
-    assert res["passed"] is True
+    assert res["passed"] is True, res["metadata_survivors"]
+
+
+@pytest.mark.skipif(not pixels._ocr_available()[0],
+                    reason="Tesseract OCR binary not available")
+def test_check_survivors_catches_visible_name_via_ocr(tmp_path):
+    # With Tesseract present, the survivor sweep OCRs the rendered PDF pages, so a
+    # name left VISIBLE in a flattened-but-unredacted PDF is caught (this is why a
+    # PDF must be redacted, not merely flattened).
+    name = corpus.PLANTED["names"][1]  # "Tan Wei Ming"
+    flat = documents.flatten_to_pdf(documents.render_pdf_pages(_pdf_with_name(name), dpi=150))
+    ds = _encaps_ds_with(flat)
+    pydicom.dcmwrite(str(tmp_path / "doc.dcm"), ds, enforce_file_format=True)
+    res = corpus.check_survivors(str(tmp_path))
+    assert res["passed"] is False
+    assert name in res["metadata_survivors"].get("names", [])
 
 
 def test_check_survivors_catches_name_in_pdf_text(tmp_path, monkeypatch):
