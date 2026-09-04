@@ -1,5 +1,6 @@
 # tests/python/test_deface.py
 import numpy as np
+from deid_engine import core
 from deid_engine import deface
 
 
@@ -120,10 +121,6 @@ def test_deface_array_degrades_without_model(monkeypatch):
     out, info = deface.deface_array(vol, modality="MR", model=None)
     assert info["defaced"] is False and "no weights" in info["note"]
     assert np.array_equal(out, vol)
-
-
-# add to tests/python/test_deface.py
-from deid_engine import core
 
 
 def test_deface_enabled_reads_profile():
