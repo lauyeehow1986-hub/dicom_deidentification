@@ -25,9 +25,33 @@ def test_is_head_inclusive_false_for_shallow_chest_slab():
     assert deface.is_head_inclusive(np.ones((4, 40, 40), dtype=np.float32)) is False
 
 
-def test_is_head_inclusive_false_when_no_air_border():
-    # Foreground fills the frame edges (no surrounding air) -> not a head FOV.
+def test_is_head_inclusive_false_for_uniform_volume():
+    # A uniform volume has no voxel above its own mean, so there is no foreground
+    # at all -> rejected by the no-foreground guard (before the border/frac logic).
     assert deface.is_head_inclusive(np.ones((24, 40, 40), dtype=np.float32)) is False
+
+
+def test_is_head_inclusive_false_when_foreground_reaches_border():
+    # Foreground touches an end-slice of the shortest axis (no air border there),
+    # so the border-background condition rejects it. This exercises border_bg_frac,
+    # not the earlier no-foreground guard.
+    d, h, w = 24, 40, 40
+    vol = np.zeros((d, h, w), dtype=np.float32)
+    vol[5:] = 100.0          # slices 5..23 bright; mean ~79, so fg = slices 5..23
+    # shortest axis is 0: end-slice z=0 is background, z=23 is foreground
+    # -> border_bg_frac = 1 - (0 + 1)/2 = 0.5, which is <= 0.7 -> rejected
+    assert deface.is_head_inclusive(vol) is False
+
+
+def test_is_head_inclusive_false_when_foreground_too_large():
+    # Air border present (both shortest-axis end-slices are background) but the
+    # interior is almost entirely foreground -> frac exceeds the 0.6 compactness
+    # bound -> rejected. Exercises the frac upper bound with the border passing.
+    d, h, w = 24, 40, 40
+    vol = np.zeros((d, h, w), dtype=np.float32)
+    vol[2:-2] = 100.0        # 20 bright slices, 2-slice air margin each end
+    # border_bg_frac = 1.0 (both ends background), frac ~0.83 > 0.6 -> rejected
+    assert deface.is_head_inclusive(vol) is False
 
 
 def test_looks_like_ct_true_for_hounsfield_floor():

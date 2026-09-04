@@ -57,7 +57,7 @@ def looks_like_ct(array) -> bool:
     a = np.asarray(array)
     if a.size == 0:
         return False
-    return float(np.percentile(a.astype(np.float32), 1)) < -300.0
+    return float(np.percentile(np.asarray(a, dtype=np.float32), 1)) < -300.0
 
 
 def is_head_inclusive(array, min_axial: int = 16) -> bool:
@@ -65,9 +65,11 @@ def is_head_inclusive(array, min_axial: int = 16) -> bool:
 
     Requires: >=3-D with >= ``min_axial`` slices on the shortest axis; a
     predominantly-background (air) volume border; and a compact central
-    foreground blob (not an edge-to-edge slab). Conservative - a false negative
-    (skipping a real head) is safer than mangling a chest scan."""
-    a = np.asarray(array).astype(np.float32)
+    foreground blob (not an edge-to-edge slab). The "air border" check is a
+    cheap proxy: it only inspects the two end-slices along the shortest axis,
+    not the full 3-D perimeter. Conservative - a false negative (skipping a
+    real head) is safer than mangling a chest scan."""
+    a = np.asarray(array, dtype=np.float32)
     if a.ndim < 3 or min(a.shape) < min_axial:
         return False
     thr = float(a.mean())
