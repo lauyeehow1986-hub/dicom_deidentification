@@ -67,3 +67,45 @@ def test_deface_available_false_without_weights(monkeypatch, tmp_path):
     monkeypatch.setattr(deface, "_model_path", lambda: tmp_path / "model.pt")
     ok, note = deface.deface_available()
     assert ok is False and "unavailable" in note
+
+
+def _face_model(vol):
+    """Stub model: 'face' = the anterior quarter (low-y rows) of foreground."""
+    a = np.asarray(vol)
+    mask = np.zeros(a.shape, dtype=bool)
+    h = a.shape[1]
+    mask[:, : h // 4, :] = a[:, : h // 4, :] > a.mean()
+    return mask
+
+
+def test_deface_array_zeros_face_keeps_brain_with_stub_model():
+    vol = _head_volume()
+    brain_before = vol[:, vol.shape[1] // 2:, :].sum()
+    out, info = deface.deface_array(vol, modality="MR", model=_face_model, margin=1)
+    assert info["defaced"] is True
+    assert info["voxels_removed"] > 0
+    # anterior face region erased, posterior (brain) region preserved
+    assert out[:, : vol.shape[1] // 8, :].sum() == 0
+    assert out[:, vol.shape[1] // 2:, :].sum() == brain_before
+
+
+def test_deface_array_skips_chest_fov_untouched():
+    chest = np.ones((4, 40, 40), dtype=np.float32)
+    out, info = deface.deface_array(chest, modality="MR", model=_face_model)
+    assert info == {"defaced": False, "reason": "no-head-fov"}
+    assert np.array_equal(out, chest)
+
+
+def test_deface_array_flags_head_ct_for_review():
+    ct = _head_volume() - 1000.0
+    out, info = deface.deface_array(ct, modality=None, model=_face_model)  # NIfTI: modality unknown
+    assert info == {"defaced": False, "flagged_for_review": "head-inclusive non-MR"}
+    assert np.array_equal(out, ct)
+
+
+def test_deface_array_degrades_without_model(monkeypatch):
+    monkeypatch.setattr(deface, "deface_available", lambda: (False, "no weights"))
+    vol = _head_volume()
+    out, info = deface.deface_array(vol, modality="MR", model=None)
+    assert info["defaced"] is False and "no weights" in info["note"]
+    assert np.array_equal(out, vol)

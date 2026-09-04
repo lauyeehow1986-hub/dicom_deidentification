@@ -82,3 +82,59 @@ def is_head_inclusive(array, min_axial: int = 16) -> bool:
     border_bg_frac = 1.0 - float((lo.mean() + hi.mean()) / 2.0)
     frac = float(fg.mean())
     return border_bg_frac > 0.7 and 0.02 < frac < 0.6
+
+
+def _dilate(mask, iters: int):
+    """Pure-numpy 6-neighbour binary dilation (avoids a scipy dependency)."""
+    m = np.asarray(mask, dtype=bool)
+    for _ in range(int(iters)):
+        d = m.copy()
+        for ax in range(m.ndim):
+            d |= np.roll(m, 1, axis=ax)
+            d |= np.roll(m, -1, axis=ax)
+        m = d
+    return m
+
+
+def _load_model():
+    """Load the bundled TorchScript face-mask model as a callable array->mask."""
+    import torch
+    net = torch.jit.load(str(_model_path()), map_location="cpu")
+    net.eval()
+
+    def _infer(array):
+        a = np.asarray(array, dtype=np.float32)
+        t = torch.from_numpy(a)[None, None]  # (1,1,D,H,W)
+        with torch.no_grad():
+            out = net(t)
+        prob = out.squeeze().cpu().numpy()
+        return prob > 0.5
+
+    return _infer
+
+
+def deface_array(array, modality: str | None = None, model=None, margin: int = 2):
+    """Return ``(new_array, info)``. Defaces only head-inclusive MR volumes.
+
+    ``modality``: 'MR'/'CT' from a DICOM tag, or ``None`` for NIfTI (then
+    ``looks_like_ct`` decides). ``model``: a callable ``array -> bool mask`` of
+    facial voxels; ``None`` loads the bundled TorchScript model (and degrades to
+    a noted skip when absent). ``info`` always has ``defaced`` plus one of
+    ``reason`` / ``voxels_removed`` / ``flagged_for_review`` / ``note``."""
+    a = np.asarray(array)
+    if not is_head_inclusive(a):
+        return a, {"defaced": False, "reason": "no-head-fov"}
+    is_ct = (modality or "").upper() == "CT" or (modality is None and looks_like_ct(a))
+    if is_ct:
+        return a, {"defaced": False, "flagged_for_review": "head-inclusive non-MR"}
+    if model is None:
+        ok, note = deface_available()
+        if not ok:
+            return a, {"defaced": False, "note": note}
+        model = _load_model()
+    mask = np.asarray(model(a)).astype(bool)
+    if margin:
+        mask = _dilate(mask, margin)
+    out = a.copy()
+    out[mask] = 0
+    return out, {"defaced": True, "voxels_removed": int(mask.sum())}
