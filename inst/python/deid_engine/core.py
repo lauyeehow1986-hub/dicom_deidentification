@@ -318,14 +318,16 @@ _DATE_ACTION_BY_MODE = {"remove": "X", "shift": "S", "keep": "K"}
 
 
 def _deidentify_nifti(full: str, out: str, profile: dict | None = None,
-                      scanner=None, ocr_autoredact: bool = False) -> dict:
+                      scanner=None, ocr_autoredact: bool = False,
+                      known_values=None) -> dict:
     """Copy a NIfTI volume through, blanking header PHI surfaces, and (when the
     profile turns pixel cleaning on) OCR-scanning its slices for burned-in text.
 
     Header text fields + all extensions are removed; the NIfTI-1/2 class is kept.
     Burned-in-text OCR reuses the DICOM OCR layer: with ``ocr_autoredact`` the
-    detected PHI boxes are zeroed; otherwise they are recorded for reviewer
-    confirmation. The image data is otherwise preserved exactly.
+    detected PHI boxes are zeroed; otherwise only their count is recorded (there
+    is no NIfTI pixel reviewer workflow yet). The image data is otherwise
+    preserved exactly.
     """
     import nibabel as nib
     import numpy as np
@@ -362,19 +364,27 @@ def _deidentify_nifti(full: str, out: str, profile: dict | None = None,
 
     # Burned-in-text OCR (optional; degrades like the DICOM pixel layer).
     clean_pixels = bool((profile or {}).get("options", {}).get("clean_pixel_data", True))
-    if clean_pixels and scanner is not None and data.ndim == 3:
-        ok, note = _pixels._ocr_available()
-        if not ok:
-            counts["nifti_ocr_note"] = note
+    if clean_pixels and scanner is not None:
+        if data.ndim != 3:
+            counts["nifti_ocr_note"] = "skipped: not 3-D"
         else:
-            try:
-                boxes = _pixels.volume_ocr_boxes(data, scanner)
-                counts["nifti_ocr_boxes"] = len(boxes)
-                if boxes and ocr_autoredact:
-                    data = _pixels.redact_volume_boxes(data, boxes, fill=0)
-                    counts["nifti_pixels_redacted"] = len(boxes)
-            except Exception as e:  # noqa: BLE001 - pixel step must not lose the file
-                counts["nifti_ocr_error"] = str(e)
+            ok, note = _pixels._ocr_available()
+            if not ok:
+                counts["nifti_ocr_note"] = note
+            else:
+                try:
+                    if known_values:
+                        try:
+                            scanner.set_known_values(known_values)
+                        except Exception:  # noqa: BLE001 - a minimal scanner may lack it
+                            pass
+                    boxes = _pixels.volume_ocr_boxes(data, scanner)
+                    counts["nifti_ocr_boxes"] = len(boxes)
+                    if boxes and ocr_autoredact:
+                        data = _pixels.redact_volume_boxes(data, boxes, fill=0)
+                        counts["nifti_pixels_redacted"] = len(boxes)
+                except Exception as e:  # noqa: BLE001 - pixel step must not lose the file
+                    counts["nifti_ocr_error"] = str(e)
 
     # type(img) keeps NIfTI-1 as NIfTI-1 and NIfTI-2 as NIfTI-2.
     out_img = type(img)(np.ascontiguousarray(data), img.affine, header=hdr)
@@ -647,7 +657,8 @@ def deidentify_study(input_path: str, output_path: str, profile: dict, keystore)
             out = _sanitised_out(out, rel, sidecar_known.get(_basename_stem(rel)))
             files_report.append(_deidentify_nifti(
                 full, out, profile=profile, scanner=scanner,
-                ocr_autoredact=_pixel_autoredact_enabled(profile)))
+                ocr_autoredact=_pixel_autoredact_enabled(profile),
+                known_values=sidecar_known.get(_basename_stem(rel))))
             continue
         if _is_json_sidecar(full):
             out = _sanitised_out(out, rel, sidecar_known.get(_basename_stem(rel)))

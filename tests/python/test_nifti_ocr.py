@@ -106,3 +106,32 @@ def test_nifti_ocr_degrades_without_tesseract(tmp_path, monkeypatch):
     rec = report["files"][0]
     assert rec["counts"].get("nifti_ocr_note")           # noted, not fatal
     assert nib.load(rec["output"]) is not None            # file still written
+
+
+def test_deidentify_nifti_seeds_scanner_with_known_values(tmp_path, monkeypatch):
+    # The OCR scanner must be seeded with this file's known identifiers (from its
+    # paired sidecar) BEFORE scanning, so burned-in names are detectable.
+    vol = np.ones((2, 8, 8), dtype=np.int16)
+    nib.save(nib.Nifti1Image(vol, np.eye(4)), str(tmp_path / "v.nii.gz"))
+
+    class SpyScanner:
+        def __init__(self):
+            self.seeded = None
+            self.seeded_at_ocr = None
+        def set_known_values(self, vals):
+            self.seeded = list(vals)
+        def scan(self, text):
+            return False
+    spy = SpyScanner()
+
+    monkeypatch.setattr(_pixels, "_ocr_available", lambda: (True, ""))
+    def spy_ocr(volume, scanner):
+        scanner.seeded_at_ocr = list(scanner.seeded or [])
+        return []
+    monkeypatch.setattr(_pixels, "volume_ocr_boxes", spy_ocr)
+
+    core._deidentify_nifti(str(tmp_path / "v.nii.gz"), str(tmp_path / "o.nii.gz"),
+                           profile={"options": {"clean_pixel_data": True}},
+                           scanner=spy, ocr_autoredact=False,
+                           known_values=["Tan Wei Ming", "S1234567D"])
+    assert spy.seeded_at_ocr == ["Tan Wei Ming", "S1234567D"]
