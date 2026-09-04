@@ -1141,6 +1141,71 @@ def _iter_text_elements(ds, _tag=None):
                 yield tagi, kw, s
 
 
+def _scan_residual_nifti(path: str, scanner, scan_pixels: bool, min_score: float) -> dict:
+    """Residual-PHI scan for a NIfTI output: the header text fields (metadata) and,
+    when OCR is available, the burned-in text on each slice (pixels). Returns the
+    same result shape as ``scan_residual`` so the batch aggregator treats DICOM and
+    NIfTI outputs uniformly."""
+    import numpy as np
+    import nibabel as nib
+
+    img = nib.load(path)
+    hdr = img.header
+    findings: list[dict] = []
+    for field in _NIFTI_TEXT_FIELDS:
+        try:
+            val = bytes(hdr[field]).split(b"\x00", 1)[0].decode("latin-1", "replace")
+        except (KeyError, ValueError):
+            continue
+        if not val:
+            continue
+        for span in scanner.scan(val):
+            findings.append({
+                "location": "metadata", "tag": 0, "keyword": f"nifti:{field}",
+                "category": span.category, "source": span.source,
+                "score": float(span.score), "preview": _mask_preview(span.text),
+            })
+    n_meta = len(findings)
+    notes = list(getattr(scanner, "notes", []))
+
+    if scan_pixels:
+        ok, note = _pixels._ocr_available()
+        if not ok:
+            notes.append(note)
+        else:
+            try:
+                data = np.asanyarray(img.dataobj)
+                if data.ndim == 3:
+                    for b in _pixels.volume_ocr_boxes(data, scanner):
+                        spans = scanner.scan(b.get("text", ""))
+                        cat = spans[0].category if spans else "text"
+                        score = spans[0].score if spans else 1.0
+                        findings.append({
+                            "location": "pixels", "tag": None, "keyword": "PixelData",
+                            "category": cat, "source": "ocr", "score": float(score),
+                            "preview": _mask_preview(b.get("text", "")),
+                        })
+                else:
+                    notes.append("pixel scan skipped: not 3-D")
+            except Exception as e:  # noqa: BLE001 - pixel scan must never crash QA
+                notes.append(f"pixel scan skipped: {e}")
+
+    n_pixels = len(findings) - n_meta
+    by_category: dict[str, int] = {}
+    for f in findings:
+        by_category[f["category"]] = by_category.get(f["category"], 0) + 1
+    passed = not any(f["score"] >= min_score for f in findings)
+    return {
+        "path": path,
+        "findings": findings,
+        "by_category": by_category,
+        "counts": {"total": len(findings), "metadata": n_meta, "pixels": n_pixels},
+        "passed": passed,
+        "identity_removed": True,   # NIfTI has no PatientIdentityRemoved tag
+        "notes": notes,
+    }
+
+
 def scan_residual(path: str, profile_id: str = "default",
                   scan_pixels: bool = True, min_score: float = 0.5) -> dict:
     """Phase 6. Re-run the detectors on an OUTPUT file and report residual PHI.
@@ -1154,11 +1219,13 @@ def scan_residual(path: str, profile_id: str = "default",
     Returns per-category counts, a masked findings list, and a pass/fail verdict
     (``passed`` is true when nothing scored at or above ``min_score``).
     """
-    import pydicom
-
-    ds = pydicom.dcmread(path)
     td = profile_get(profile_id).get("text_detection") or {}
     scanner = _build_scanner(td, [])   # no header-token seeding on outputs
+    if _is_nifti(path):
+        return _scan_residual_nifti(path, scanner, scan_pixels, min_score)
+
+    import pydicom
+    ds = pydicom.dcmread(path)
 
     findings: list[dict] = []
     for tagi, kw, value in _iter_text_elements(ds):
