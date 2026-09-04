@@ -31,6 +31,7 @@ from . import keystore as _keystore
 from . import signing as _signing
 from . import textscan as _textscan
 from . import pixels as _pixels
+from . import deface as _deface
 from . import documents as _documents
 from . import workspace as _workspace
 from .actions import DeidContext, apply_action
@@ -361,6 +362,14 @@ def _deidentify_nifti(full: str, out: str, profile: dict | None = None,
     data = np.asanyarray(img.dataobj)
     counts = {"nifti_header_fields_scrubbed": scrubbed,
               "nifti_extensions_removed": ext_removed}
+
+    # Optional ML defacing (MR-only, FOV-gated; degrades when weights absent).
+    if _deface_enabled(profile or {}):
+        try:
+            data, dinfo = _deface.deface_array(data, modality=None)
+            counts["deface"] = dinfo
+        except Exception as e:  # noqa: BLE001 - deface must not lose the file
+            counts["deface_error"] = str(e)
 
     # Burned-in-text OCR (optional; degrades like the DICOM pixel layer).
     clean_pixels = bool((profile or {}).get("options", {}).get("clean_pixel_data", True))

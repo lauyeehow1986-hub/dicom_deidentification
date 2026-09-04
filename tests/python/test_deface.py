@@ -1,7 +1,9 @@
 # tests/python/test_deface.py
 import numpy as np
+import nibabel as nib
 from deid_engine import core
 from deid_engine import deface
+from deid_engine import keystore
 
 
 def _head_volume():
@@ -140,3 +142,38 @@ def test_deid_run_deface_flag_turns_on_profile(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "deidentify_study", _capture)
     core.deid_run(str(tmp_path), str(tmp_path / "o"), deface=True)
     assert seen["p"]["deface"]["enabled"] is True
+
+
+def test_nifti_defaced_when_enabled(tmp_path, monkeypatch):
+    vol = _head_volume()
+    nib.save(nib.Nifti1Image(vol, np.eye(4)), str(tmp_path / "head.nii.gz"))
+    out = tmp_path / "out"
+
+    # Inject a deterministic deface: zero the anterior eighth, report defaced.
+    def fake_deface(array, modality=None, model=None, margin=2):
+        a = np.asarray(array).copy()
+        a[:, : a.shape[1] // 8, :] = 0
+        return a, {"defaced": True, "voxels_removed": 1}
+    monkeypatch.setattr(core._deface, "deface_array", fake_deface)
+
+    prof = dict(core.profile_get("default"))
+    prof["deface"] = {"enabled": True}
+    ks = keystore.ephemeral()
+    report = core.deidentify_study(str(tmp_path / "head.nii.gz"), str(out), prof, ks)
+    rec = report["files"][0]
+    assert rec["counts"]["deface"]["defaced"] is True
+    got = nib.load(rec["output"]).get_fdata()
+    assert got[:, : vol.shape[1] // 8, :].sum() == 0
+
+
+def test_nifti_not_defaced_when_disabled(tmp_path, monkeypatch):
+    vol = _head_volume()
+    nib.save(nib.Nifti1Image(vol, np.eye(4)), str(tmp_path / "head.nii.gz"))
+    out = tmp_path / "out"
+    called = {"n": 0}
+    monkeypatch.setattr(core._deface, "deface_array",
+                        lambda *a, **k: called.__setitem__("n", called["n"] + 1) or (a[0], {}))
+    prof = core.profile_get("default")   # deface off by default
+    ks = keystore.ephemeral()
+    core.deidentify_study(str(tmp_path / "head.nii.gz"), str(out), prof, ks)
+    assert called["n"] == 0
