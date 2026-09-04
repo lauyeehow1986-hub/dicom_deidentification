@@ -19,6 +19,9 @@ mod_interactive_ui <- function(id) {
                          placeholder = "C:/keys/study.keystore"),
         shiny::passwordInput(ns("passphrase"), "Keystore passphrase")
       ),
+      shiny::checkboxInput(ns("deface"),
+                           "Deface head-inclusive MRI (destructive, MR only)",
+                           value = FALSE),
       shiny::actionButton(ns("run"), "De-identify", class = "btn-primary",
                           icon = shiny::icon("user-shield")),
       shiny::hr(),
@@ -63,7 +66,8 @@ mod_interactive_server <- function(id, app_state) {
       pw <- if (isTRUE(input$reversible)) input$passphrase else NULL
 
       out <- tryCatch(
-        engine_deid_run(input$input_dir, input$output_dir, input$profile, ks, pw),
+        engine_deid_run(input$input_dir, input$output_dir, input$profile, ks, pw,
+                        deface = isTRUE(input$deface)),
         error = function(e) {
           shiny::showNotification(paste("Error:", conditionMessage(e)), type = "error")
           NULL
