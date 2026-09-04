@@ -122,7 +122,13 @@ freely so anyone can verify outputs.
 
 ## 4. Verify + validate on the target (offline)
 
-**Bundle integrity** — confirm the copy is complete and untampered:
+The target is Command Prompt / double-click only — **nothing here needs PowerShell.**
+`run.bat` launches, `verify.bat` checks integrity, and the acceptance self-test is the
+app's **Validation** tab (pure R). All three use the bundle's own portable R.
+
+**Bundle integrity** — confirm the copy is complete and untampered. On the **target**,
+double-click **`verify.bat`** (it re-checksums every file against the manifest with the
+bundle's portable R and prints `RESULT: OK`). On a **connected** machine you can instead run:
 ```powershell
 pwsh tools/build_bundle.ps1 -Out dist/dicomdeid-portable -Verify   # re-checksums vs the manifest
 ```
