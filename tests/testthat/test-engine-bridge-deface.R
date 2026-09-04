@@ -14,6 +14,7 @@ test_that("engine_deid_run forwards deface = TRUE as the last positional arg", {
 
   expect_equal(called$fn, "deid_run")
   # deface is the last positional arg
+  expect_equal(length(called$args), 13L)
   n <- length(called$args)
   expect_equal(called$args[[n]], TRUE)
 })
@@ -30,6 +31,7 @@ test_that("engine_deid_run defaults deface to FALSE as the last positional arg",
 
   expect_equal(called$fn, "deid_run")
   # deface is the last positional arg
+  expect_equal(length(called$args), 13L)
   n <- length(called$args)
   expect_equal(called$args[[n]], FALSE)
 })

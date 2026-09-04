@@ -14,8 +14,10 @@ test_that("engine_deid_run forwards pdf_mode/pdf_dpi to the engine", {
                   pdf_mode = "rasterize_redact", pdf_dpi = 120)
 
   expect_equal(called$fn, "deid_run")
-  # pdf_mode and pdf_dpi are the last two positional args
-  n <- length(called$args)
-  expect_equal(called$args[[n - 1]], "rasterize_redact")
-  expect_equal(called$args[[n]], 120)
+  # positional order forwarded to call_engine (after fn): in, out, profile_id,
+  # keystore_path, passphrase, reversible, sign_key_path, signer, project_id,
+  # autoredact_pixels, pdf_mode, pdf_dpi, deface
+  expect_equal(length(called$args), 13L)
+  expect_equal(called$args[[11]], "rasterize_redact")  # pdf_mode
+  expect_equal(called$args[[12]], 120)                 # pdf_dpi
 })
