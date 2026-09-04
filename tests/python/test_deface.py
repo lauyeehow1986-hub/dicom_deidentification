@@ -221,3 +221,26 @@ def test_dicom_multiframe_mr_defaced_when_enabled(tmp_path, monkeypatch):
     assert rec["counts"]["deface"]["defaced"] is True
     got = pydicom.dcmread(str(out)).pixel_array
     assert got[:, :5, :].sum() == 0
+
+
+def test_dicom_compressed_not_transcoded_when_not_defaced(tmp_path, monkeypatch):
+    from pydicom.uid import RLELossless
+    p = tmp_path / "mf.dcm"
+    _multiframe_mr(str(p))
+    ds0 = pydicom.dcmread(str(p))
+    ds0.compress(RLELossless)                      # pydicom-native RLE, no extra deps
+    ds0.save_as(str(p), write_like_original=False)
+    assert pydicom.dcmread(str(p)).file_meta.TransferSyntaxUID == RLELossless
+
+    out = tmp_path / "out.dcm"
+    # deface enabled, but the stub reports NOT defaced (a gate skip). The file must
+    # NOT be transcoded to uncompressed.
+    monkeypatch.setattr(core._deface, "deface_array",
+                        lambda array, modality=None, model=None, margin=2:
+                        (np.asarray(array), {"defaced": False, "reason": "no-head-fov"}))
+    prof = dict(core.profile_get("default")); prof["deface"] = {"enabled": True}
+    ks = keystore.ephemeral()
+    report = core.deidentify_study(str(p), str(out), prof, ks)
+    rec = report["files"][0]
+    assert rec["counts"]["deface"]["defaced"] is False
+    assert pydicom.dcmread(str(rec["output"])).file_meta.TransferSyntaxUID == RLELossless

@@ -724,13 +724,11 @@ def deidentify_study(input_path: str, output_path: str, profile: dict, keystore)
         if _deface_enabled(profile) and "PixelData" in ds:
             try:
                 modality = str(getattr(ds, "Modality", "") or "")
-                if bool(ds.file_meta.TransferSyntaxUID.is_compressed):
-                    ds.decompress()
-                frames = _pixels.load_frames(ds)  # (N,H,W) or (N,H,W,C)
+                frames = _pixels.load_frames(ds)  # decodes even if compressed; no mutation
                 if frames.ndim == 3 and frames.shape[0] > 1:
                     new, dinfo = _deface.deface_array(frames, modality=modality)
                     if dinfo.get("defaced"):
-                        _pixels._store_frames(ds, new)
+                        _pixels.store_frames(ds, new)  # writes valid uncompressed
                     counts["deface"] = dinfo
                 else:
                     counts["deface"] = {"defaced": False,

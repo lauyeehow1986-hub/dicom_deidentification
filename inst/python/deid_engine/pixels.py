@@ -41,7 +41,7 @@ def apply_boxes(frames: np.ndarray, boxes, fill=0) -> np.ndarray:
     return out
 
 
-def _store_frames(ds, frames: np.ndarray) -> None:
+def store_frames(ds, frames: np.ndarray) -> None:
     """Write frames back into an uncompressed dataset, keeping it valid."""
     nframes = frames.shape[0]
     arr = frames[0] if nframes == 1 else frames
@@ -66,7 +66,7 @@ def redact_pixels(ds, boxes, fill=0) -> dict:
         ds.decompress()  # decode + switch to an uncompressed transfer syntax
     frames = load_frames(ds)
     redacted = apply_boxes(frames, boxes, fill)
-    _store_frames(ds, redacted)
+    store_frames(ds, redacted)
     return {"frames": int(frames.shape[0]), "boxes": len(boxes),
             "decompressed": was_compressed}
 
