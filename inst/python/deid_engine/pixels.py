@@ -161,3 +161,50 @@ def ocr_phi_boxes(ds, scanner) -> dict:
             b["frame"] = i
             boxes.append(b)
     return {"boxes": boxes}
+
+
+def volume_ocr_boxes(volume, scanner, axis=None) -> list:
+    """OCR each in-plane slice of a 3-D NIfTI-style volume; return PHI boxes.
+
+    Slices are taken along ``axis`` (default: the shortest axis, i.e. the
+    through-plane/stack direction, which yields the most image-like planes).
+    Each box is ``{x, y, w, h, text, source, slice, axis}``. Assumes the caller
+    already confirmed OCR is available (``_ocr_available``). Non-3-D input -> []."""
+    v = np.asarray(volume)
+    if v.ndim != 3:
+        return []
+    ax = int(np.argmin(v.shape)) if axis is None else int(axis)
+    boxes = []
+    for i in range(v.shape[ax]):
+        img = _frame_to_uint8(np.take(v, i, axis=ax))
+        for b in image_phi_boxes(img, scanner):
+            b = dict(b)
+            b["slice"] = i
+            b["axis"] = ax
+            boxes.append(b)
+    return boxes
+
+
+def redact_volume_boxes(volume, boxes, fill=0):
+    """Zero each box on its slice within a copy of ``volume``; return the copy.
+
+    Boxes are ``{x, y, w, h, slice, axis}`` (as from ``volume_ocr_boxes``);
+    coordinates are clamped to the in-plane bounds."""
+    v = np.asarray(volume).copy()
+    for b in boxes:
+        ax = int(b.get("axis", 0))
+        i = int(b["slice"])
+        if not (0 <= i < v.shape[ax]):
+            continue
+        plane = np.take(v, i, axis=ax)
+        h, w = plane.shape[0], plane.shape[1]
+        x0 = max(0, int(b["x"])); y0 = max(0, int(b["y"]))
+        x1 = min(w, x0 + int(b["w"])); y1 = min(h, y0 + int(b["h"]))
+        if x1 <= x0 or y1 <= y0:
+            continue
+        plane = plane.copy()
+        plane[y0:y1, x0:x1, ...] = fill
+        idx = [slice(None)] * v.ndim
+        idx[ax] = i
+        v[tuple(idx)] = plane
+    return v
