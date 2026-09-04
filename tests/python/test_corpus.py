@@ -45,7 +45,8 @@ def test_dicom_fixtures_are_valid_and_readback(tmp_path):
             with open(out / f["rel"], encoding="utf-8") as fh:
                 assert isinstance(_json.load(fh), dict)
             continue
-        if f["encoding"] in ("nifti", "nifti2", "nifti_pair"):
+        if f["encoding"] in ("nifti", "nifti2", "nifti_pair",
+                             "nifti_head_mr", "nifti_burned_in"):
             img = nib.load(str(out / f["rel"]))
             assert img.get_fdata().size > 0
             continue
@@ -121,3 +122,13 @@ def test_burned_in_pixels_have_nonbackground_text(tmp_path):
     assert arr.max() > arr.min(), "burned-in text region is flat"
     # the fixture manifest flags which encodings carry burned-in text
     assert any(f.get("burned_in") for f in man["fixtures"])
+
+
+def test_corpus_has_head_mr_and_burned_in_nifti(tmp_path):
+    man = corpus.build_corpus(str(tmp_path))
+    encs = {f["encoding"] for f in man["fixtures"]}
+    assert "nifti_head_mr" in encs        # head-inclusive MR volume (deface target)
+    assert "nifti_burned_in" in encs      # burned-in-text NIfTI (OCR target)
+    head = next(f for f in man["fixtures"] if f["encoding"] == "nifti_head_mr")
+    img = nib.load(str(tmp_path / head["rel"]))
+    assert min(img.shape) >= 16           # deep enough for the FOV gate

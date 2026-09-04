@@ -53,7 +53,8 @@ PLANTED = {
         "nested_sequence": True,
     },
     "encodings": ["single_frame", "multiframe_cine", "rgb", "jpeg2000", "nifti",
-                  "nifti2", "nifti_pair", "bids_sidecar", "encapsulated_pdf"],
+                  "nifti2", "nifti_pair", "bids_sidecar", "encapsulated_pdf",
+                  "nifti_head_mr", "nifti_burned_in"],
 }
 
 _SC_SOP = "1.2.840.10008.5.1.4.1.1.7"       # Secondary Capture Image Storage
@@ -265,6 +266,39 @@ def build_corpus(out_dir: str) -> dict:
     fixtures.append({"rel": rel, "encoding": "encapsulated_pdf",
                      "transfer_syntax": str(ExplicitVRLittleEndian),
                      "burned_in": True, "encapsulated_pdf": True})
+
+    # 10. Head-inclusive MR NIfTI (defacing target): an air-bordered ellipsoid
+    #     "head" deep enough to pass the FOV gate. No burned-in text here.
+    d, h, w = 24, 40, 40
+    zz, yy, xx = np.ogrid[:d, :h, :w]
+    ell = (((zz - d / 2) / (d * 0.35))**2 + ((yy - h / 2) / (h * 0.3))**2 +
+           ((xx - w / 2) / (w * 0.3))**2) <= 1.0
+    head = np.zeros((d, h, w), dtype=np.float32)
+    head[ell] = 600.0
+    rel = "nifti_head_mr.nii.gz"
+    nib.save(nib.Nifti1Image(head, np.eye(4)), os.path.join(out_dir, rel))
+    fixtures.append({"rel": rel, "encoding": "nifti_head_mr",
+                     "transfer_syntax": "nifti-1", "burned_in": False,
+                     "modality": "MR"})
+
+    # 11. Burned-in-text NIfTI (OCR target): a planted NRIC rasterised into one
+    #     slice as bright pixels. Uses PIL (already pulled in by the pixel stack)
+    #     to render text; falls back to a bright block if PIL is unavailable so
+    #     the fixture always exists.
+    vol = np.zeros((3, 64, 96), dtype=np.uint8)
+    nric = PLANTED["nric_fin"][0]
+    try:
+        from PIL import Image, ImageDraw
+        im = Image.new("L", (96, 64), 0)
+        ImageDraw.Draw(im).text((4, 24), nric, fill=255)
+        vol[1] = np.asarray(im, dtype=np.uint8)
+    except Exception:  # noqa: BLE001 - keep the fixture even without PIL
+        vol[1, 24:34, 4:60] = 255
+    rel = "nifti_burned_in.nii.gz"
+    nib.save(nib.Nifti1Image(vol, np.eye(4)), os.path.join(out_dir, rel))
+    fixtures.append({"rel": rel, "encoding": "nifti_burned_in",
+                     "transfer_syntax": "nifti-1", "burned_in": True,
+                     "planted_text": nric})
 
     manifest = {"out": out_dir, "planted": PLANTED, "fixtures": fixtures}
     with open(os.path.join(out_dir, "planted_manifest.json"), "w",
