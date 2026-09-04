@@ -267,7 +267,7 @@ def build_corpus(out_dir: str) -> dict:
                      "transfer_syntax": str(ExplicitVRLittleEndian),
                      "burned_in": True, "encapsulated_pdf": True})
 
-    # 10. Head-inclusive MR NIfTI (defacing target): an air-bordered ellipsoid
+    # 7. Head-inclusive MR NIfTI (defacing target): an air-bordered ellipsoid
     #     "head" deep enough to pass the FOV gate. No burned-in text here.
     d, h, w = 24, 40, 40
     zz, yy, xx = np.ogrid[:d, :h, :w]
@@ -281,19 +281,12 @@ def build_corpus(out_dir: str) -> dict:
                      "transfer_syntax": "nifti-1", "burned_in": False,
                      "modality": "MR"})
 
-    # 11. Burned-in-text NIfTI (OCR target): a planted NRIC rasterised into one
-    #     slice as bright pixels. Uses PIL (already pulled in by the pixel stack)
-    #     to render text; falls back to a bright block if PIL is unavailable so
-    #     the fixture always exists.
-    vol = np.zeros((3, 64, 96), dtype=np.uint8)
+    # 8. Burned-in-text NIfTI (OCR target): a planted NRIC rasterised into one
+    #    slice as bright pixels, reusing the same text-rendering helper as the
+    #    DICOM burned-in fixtures above.
+    vol = np.zeros((3, 64, 96), dtype=np.uint16)
     nric = PLANTED["nric_fin"][0]
-    try:
-        from PIL import Image, ImageDraw
-        im = Image.new("L", (96, 64), 0)
-        ImageDraw.Draw(im).text((4, 24), nric, fill=255)
-        vol[1] = np.asarray(im, dtype=np.uint8)
-    except Exception:  # noqa: BLE001 - keep the fixture even without PIL
-        vol[1, 24:34, 4:60] = 255
+    vol[1] = _burn_text_gray(64, 96, nric)
     rel = "nifti_burned_in.nii.gz"
     nib.save(nib.Nifti1Image(vol, np.eye(4)), os.path.join(out_dir, rel))
     fixtures.append({"rel": rel, "encoding": "nifti_burned_in",
