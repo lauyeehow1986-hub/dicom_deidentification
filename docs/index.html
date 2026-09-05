@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DICOM De-Identification — how to run it</title>
+<meta name="description" content="Step-by-step guide to running the R Shiny DICOM/NIfTI de-identification app: portable double-click launch, a tour of every tab, and the acceptance self-test.">
+<style>
+  :root{
+    --bg:#f6f7f9; --surface:#ffffff; --surface-2:#eef1f5; --ink:#1a2230; --muted:#5a6675;
+    --line:#dce1e8; --accent:#1f6feb; --accent-ink:#ffffff; --ok:#1f8f4e; --ok-bg:#e6f4ea;
+    --warn-bg:#fdebd8; --warn-ink:#8a4b12; --code-bg:#0f1523; --code-ink:#e7ecf3;
+    --shadow:0 1px 2px rgba(16,24,40,.06),0 6px 20px rgba(16,24,40,.06);
+    --radius:14px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0e1116; --surface:#161b22; --surface-2:#1c232d; --ink:#e7ecf3; --muted:#9aa7b6;
+      --line:#2a323d; --accent:#4d9dff; --accent-ink:#08111f; --ok:#5ed08c; --ok-bg:#12321f;
+      --warn-bg:#3a2a16; --warn-ink:#f2c489; --code-bg:#0a0e16; --code-ink:#e7ecf3;
+      --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1040px;margin:0 auto;padding:0 20px}
+  code,kbd{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;font-size:.92em}
+  kbd{background:var(--surface-2);border:1px solid var(--line);border-bottom-width:2px;
+    border-radius:6px;padding:.05em .45em}
+
+  /* Header */
+  header.hero{padding:56px 0 30px;border-bottom:1px solid var(--line);
+    background:linear-gradient(180deg,var(--surface),transparent)}
+  .eyebrow{display:inline-flex;align-items:center;gap:.5em;font-size:.8rem;font-weight:600;
+    letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px var(--ok-bg)}
+  h1{font-size:clamp(1.9rem,4.5vw,3rem);line-height:1.1;margin:.35em 0 .2em;letter-spacing:-.02em}
+  .lede{font-size:1.15rem;color:var(--muted);max-width:70ch;margin:0}
+  .cta{margin-top:22px;display:flex;flex-wrap:wrap;gap:10px}
+  .btn{display:inline-flex;align-items:center;gap:.5em;padding:.6em 1.05em;border-radius:10px;
+    font-weight:600;font-size:.95rem;border:1px solid var(--line);background:var(--surface);color:var(--ink)}
+  .btn.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+  .btn:hover{text-decoration:none;transform:translateY(-1px)}
+
+  .disclaimer{margin:22px 0 0;background:var(--warn-bg);color:var(--warn-ink);
+    border-radius:10px;padding:12px 16px;font-size:.93rem}
+  .disclaimer strong{color:var(--warn-ink)}
+
+  /* Sections */
+  section{padding:46px 0;border-bottom:1px solid var(--line)}
+  h2{font-size:1.55rem;letter-spacing:-.01em;margin:0 0 .15em}
+  h2 .num{color:var(--accent);font-variant-numeric:tabular-nums;margin-right:.4em}
+  .sub{color:var(--muted);margin:0 0 26px;max-width:72ch}
+
+  /* Steps */
+  ol.steps{list-style:none;counter-reset:s;padding:0;margin:0;display:grid;gap:14px}
+  ol.steps>li{counter-increment:s;position:relative;background:var(--surface);border:1px solid var(--line);
+    border-radius:12px;padding:16px 18px 16px 60px;box-shadow:var(--shadow)}
+  ol.steps>li::before{content:counter(s);position:absolute;left:16px;top:16px;width:30px;height:30px;
+    display:grid;place-items:center;border-radius:50%;background:var(--accent);color:var(--accent-ink);
+    font-weight:700;font-size:.95rem}
+  ol.steps>li b{display:block;margin-bottom:2px}
+  ol.steps>li p{margin:.2em 0 0;color:var(--muted)}
+
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:22px;align-items:start}
+  @media (max-width:760px){.grid2{grid-template-columns:1fr}}
+
+  /* Figures */
+  figure{margin:0;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+    overflow:hidden;box-shadow:var(--shadow)}
+  figure img{display:block;width:100%;height:auto;background:var(--surface-2);border-bottom:1px solid var(--line)}
+  figcaption{padding:12px 16px;font-size:.9rem;color:var(--muted)}
+  figcaption b{color:var(--ink)}
+
+  .tour{display:grid;gap:26px}
+  .tour .row{display:grid;grid-template-columns:1.35fr 1fr;gap:24px;align-items:center}
+  .tour .row.rev{grid-template-columns:1fr 1.35fr}
+  .tour .row.rev .txt{order:2}
+  @media (max-width:820px){.tour .row,.tour .row.rev{grid-template-columns:1fr}.tour .row.rev .txt{order:0}}
+  .tour h3{margin:0 0 .3em;font-size:1.15rem}
+  .tour p{margin:0;color:var(--muted)}
+  .chip{display:inline-block;font-size:.72rem;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+    color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);
+    padding:.2em .6em;border-radius:999px;margin-bottom:.6em}
+
+  /* Code blocks */
+  pre{background:var(--code-bg);color:var(--code-ink);border-radius:12px;padding:16px 18px;overflow-x:auto;
+    font-size:.9rem;line-height:1.55;border:1px solid var(--line)}
+  pre .c{color:#8aa0b6}
+  .callout{background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--accent);
+    border-radius:10px;padding:14px 18px;margin-top:18px;color:var(--muted)}
+  .callout b{color:var(--ink)}
+
+  /* Proof */
+  .proof{display:grid;grid-template-columns:1fr 1.25fr;gap:26px;align-items:center}
+  @media (max-width:820px){.proof{grid-template-columns:1fr}}
+  .verdict{display:inline-flex;align-items:center;gap:.5em;background:var(--ok-bg);color:var(--ok);
+    font-weight:700;padding:.4em .8em;border-radius:999px;margin-bottom:.6em}
+  ul.checks{list-style:none;padding:0;margin:.4em 0 0;display:grid;gap:8px}
+  ul.checks li{display:flex;gap:.6em;align-items:flex-start;color:var(--muted)}
+  ul.checks li::before{content:"✓";color:var(--ok);font-weight:800}
+
+  footer{padding:40px 0 60px;color:var(--muted);font-size:.9rem}
+  footer a{color:var(--ink);border-bottom:1px solid var(--line)}
+  .foot-grid{display:flex;flex-wrap:wrap;gap:10px 26px;margin-bottom:16px}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="eyebrow"><span class="dot"></span> R Shiny · relocatable Python engine · air-gap ready</span>
+    <h1>DICOM De-Identification</h1>
+    <p class="lede">De-identify DICOM &amp; NIfTI medical images and their metadata — with configurable
+      rules, a self-improvement loop, a queued bulk engine, and a two-role quality-assurance workflow.
+      This page shows you how to run it.</p>
+    <div class="cta">
+      <a class="btn primary" href="#run">▶ How to run it</a>
+      <a class="btn" href="#tour">Tour the app</a>
+      <a class="btn" href="https://github.com/lauyeehow1986-hub/dicom_deidentification">Source on GitHub ↗</a>
+    </div>
+    <p class="disclaimer"><strong>Research / educational de-identification tool — not for diagnosis or
+      clinical decision-making.</strong> Never load real patient data into a shared or networked instance;
+      the repository ships only synthetic, planted-PHI fixtures.</p>
+  </div>
+</header>
+
+<main>
+
+<section id="run">
+  <div class="wrap">
+    <h2><span class="num">1</span>Run it — the portable way (no install)</h2>
+    <p class="sub">The recommended path for a locked-down, air-gapped laptop. The whole app — portable R,
+      the Python engine, the NER model, and Tesseract OCR — ships inside one folder. Nothing is installed
+      on the target and nothing needs PowerShell or admin rights.</p>
+
+    <div class="grid2">
+      <ol class="steps">
+        <li><b>Copy the folder over</b><p>Copy <code>dicomdeid-portable</code> to the machine. Keep the path
+          short (e.g. <code>C:\dicomdeid\</code>) so Windows never trips on long library paths.</p></li>
+        <li><b>Verify the copy (optional)</b><p>Double-click <code>verify.bat</code>. It re-checksums every
+          file against the shipped manifest and prints <code>RESULT: OK</code>.</p></li>
+        <li><b>Launch</b><p>Double-click <code>run.bat</code> (or <code>run.vbs</code> for no console window).
+          A window reports <em>“Starting the app — your browser will open shortly.”</em></p></li>
+        <li><b>Use it in your browser</b><p>Your default browser opens at
+          <code>http://127.0.0.1:8973</code>. Everything runs locally — no network is used.</p></li>
+        <li><b>Set a keystore passphrase</b><p>On the first reversible run the app asks for a passphrase; that
+          creates the encrypted crosswalk. It never travels inside the bundle.</p></li>
+      </ol>
+
+      <figure>
+        <img src="assets/img/00-run-folder.png" alt="The dicomdeid-portable folder in Windows Explorer, showing run.bat, run.vbs and verify.bat" loading="lazy">
+        <figcaption><b>The bundle folder.</b> Double-click <b>run.bat</b>. <code>verify.bat</code> checks
+          integrity; <code>app/</code>, <code>library/</code> and <code>R-Portable/</code> hold the
+          self-contained runtimes.</figcaption>
+      </figure>
+    </div>
+
+    <div class="grid2" style="margin-top:22px">
+      <figure>
+        <img src="assets/img/01-projects.png" alt="The app open in a browser, showing the top tab bar and an engine: ready badge" loading="lazy">
+        <figcaption><b>The app, running.</b> Enter your name, pick a role, and the green
+          <b>engine: ready</b> badge confirms the Python de-identification engine has loaded.</figcaption>
+      </figure>
+      <div>
+        <h3 style="margin-top:0">Prefer developer mode?</h3>
+        <p class="sub">If R and the app's packages are already present, run it from the project root — after
+          building the relocatable Python engine venv once on a connected machine.</p>
+<pre><span class="c"># once, on a connected build machine:</span>
+pwsh inst/python/build_venv.ps1 -Phi -Ner
+
+<span class="c"># then, from the project root:</span>
+Rscript -e 'shiny::runApp(".")'</pre>
+        <div class="callout">The R side finds the engine via the <b>DICOMDEID_VENV</b> environment variable
+          (default <code>inst/python/.venv</code>). See <a href="airgap-install.md">docs/airgap-install.md</a>
+          for the full offline build &amp; packaging steps.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="tour">
+  <div class="wrap">
+    <h2><span class="num">2</span>A tour of the app</h2>
+    <p class="sub">Ten tabs, gated by role (<em>de-identifier</em> vs <em>reviewer</em>). Here are the ones you'll
+      use most.</p>
+
+    <div class="tour">
+      <div class="row">
+        <figure>
+          <img src="assets/img/02-interactive.png" alt="Interactive tab: input folder, output folder, profile, reversible and deface options, and a De-identify button" loading="lazy">
+        </figure>
+        <div class="txt">
+          <span class="chip">Interactive</span>
+          <h3>De-identify one folder</h3>
+          <p>Point at an input folder and an output folder, pick a profile, choose reversible or irreversible,
+            and run — with a before/after metadata diff on the first file. Optional defacing for
+            head-inclusive MRI.</p>
+        </div>
+      </div>
+
+      <div class="row rev">
+        <div class="txt">
+          <span class="chip">Pixels</span>
+          <h3>Burned-in &amp; manual redaction</h3>
+          <p>Scrub text burned into the image (OCR-driven auto-detection) and draw manual redaction boxes;
+            audio/waveform is stripped too. Run the metadata de-id first, then load its output here.</p>
+        </div>
+        <figure>
+          <img src="assets/img/03-pixels.png" alt="Pixels tab: DICOM file input, redaction box coordinates, and a frame preview" loading="lazy">
+        </figure>
+      </div>
+
+      <div class="row">
+        <figure>
+          <img src="assets/img/04-rules.png" alt="Rules and Profiles tab: date policy, reversibility, private-tag policy, PS3.15 options, and text-PHI detector toggles" loading="lazy">
+        </figure>
+        <div class="txt">
+          <span class="chip">Rules &amp; Profiles</span>
+          <h3>Configure the policy</h3>
+          <p>Per-project profiles: date handling (remove / interval-preserving shift / keep), reversibility,
+            private-tag policy, PS3.15 option flags, and the layered text-PHI detectors — header-token scrub,
+            gazetteer, Presidio, and a transformer NER.</p>
+        </div>
+      </div>
+
+      <div class="row rev">
+        <div class="txt">
+          <span class="chip">QA / Review</span>
+          <h3>Independent sign-off</h3>
+          <p>A reviewer — not the de-identifier — re-scans the outputs for residual PHI and records a
+            pass/fail decision. Finding previews are masked, and every action is written to a hash-chained
+            audit log.</p>
+        </div>
+        <figure>
+          <img src="assets/img/05-qa.png" alt="QA / Review tab: residual scan controls, reviewer sign-off, residual-PHI verdict and masked findings" loading="lazy">
+        </figure>
+      </div>
+
+      <div class="row">
+        <figure>
+          <img src="assets/img/06-bulk.png" alt="Bulk tab: input/output roots, batch name, parallel workers, scan and register, start/resume/stop, progress and failures" loading="lazy">
+        </figure>
+        <div class="txt">
+          <span class="chip">Bulk</span>
+          <h3>Whole-tree, resumable</h3>
+          <p>Queue an entire directory tree, run <em>N</em> parallel workers, and start / stop / resume.
+            A SQLite manifest tracks every file's state, so a killed job restarts without reprocessing what's
+            already done — batches up to ~2&nbsp;TB.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="proof">
+  <div class="wrap">
+    <h2><span class="num">3</span>Prove it works — the acceptance self-test</h2>
+    <p class="sub">The <b>Validation</b> tab runs the whole pipeline over a synthetic, <em>planted-PHI</em>
+      corpus and checks that nothing planted survives. No real studies are ever needed.</p>
+
+    <div class="proof">
+      <div>
+        <span class="verdict">● PASS</span>
+        <p>One click builds the corpus, de-identifies it, and verifies:</p>
+        <ul class="checks">
+          <li>every input produced valid, re-readable output</li>
+          <li>zero planted identifiers survived in metadata</li>
+          <li>the residual detector flagged nothing in the pixels</li>
+          <li>reversible mode round-trips pseudonym → original</li>
+          <li>a rerun reprocesses nothing (resumable)</li>
+          <li>defacing applied or gracefully skipped</li>
+        </ul>
+        <div class="callout">Run it in both <b>reversible</b> and <b>irreversible</b> mode — expect
+          <b>PASS 6/6</b> each. The same checks back the automated test suites (<code>testthat</code> +
+          <code>pytest</code>).</div>
+      </div>
+      <figure>
+        <img src="assets/img/08-validation-pass.png" alt="Validation tab showing the acceptance report: PASS, no planted PHI survived, with a green checks table" loading="lazy">
+        <figcaption><b>Acceptance report.</b> “PASS — no planted PHI survived; all checks green.”</figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="foot-grid">
+      <a href="https://github.com/lauyeehow1986-hub/dicom_deidentification">GitHub repository</a>
+      <a href="airgap-install.md">Air-gap install</a>
+      <a href="security-model.md">Security model</a>
+      <a href="ps315-mapping.md">PS3.15 mapping</a>
+      <a href="roadmap.md">Roadmap</a>
+    </div>
+    <p>Built for cardiovascular research de-identification. Educational / research tool — not for diagnosis or
+      clinical decision-making. Screenshots show synthetic data only; no real patient data appears anywhere in
+      this project.</p>
+  </div>
+</footer>
+
+</body>
+</html>
