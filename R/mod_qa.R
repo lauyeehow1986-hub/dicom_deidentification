@@ -54,6 +54,36 @@ mod_qa_ui <- function(id) {
         bslib::card_body(shiny::tableOutput(ns("findings")))
       )
     ),
+    bslib::card(
+      bslib::card_header(shiny::tagList(
+        "Teach a format from a survivor ",
+        shiny::span(class = "small text-muted",
+                    "(adds an opt-in rule to the selected profile)"))),
+      bslib::card_body(
+        shiny::p(class = "small text-muted",
+          paste("Spotted a residual identifier the detectors miss? Paste a",
+                "same-shape sample (real or synthetic — it is used only to",
+                "derive the pattern, not stored) to add a rule that scrubs it at",
+                "de-id time and flags it here. Then re-run the scan.")),
+        bslib::layout_columns(
+          col_widths = c(5, 3, 2, 2),
+          shiny::textAreaInput(ns("fmt_samples"), "Sample(s), one per line",
+                               rows = 2, placeholder = "e.g. 1234567890A"),
+          shiny::textInput(ns("fmt_category"), "Category", value = "case_number"),
+          shiny::numericInput(ns("fmt_score"), "Score", value = 0.95,
+                              min = 0.5, max = 1, step = 0.05),
+          shiny::div(
+            class = "d-flex flex-column gap-1",
+            shiny::actionButton(ns("fmt_preview"), "Preview",
+                                class = "btn-outline-secondary btn-sm",
+                                icon = shiny::icon("wand-magic-sparkles")),
+            shiny::actionButton(ns("fmt_add"), "Add rule",
+                                class = "btn-success btn-sm",
+                                icon = shiny::icon("plus")))
+        ),
+        shiny::uiOutput(ns("fmt_result"))
+      )
+    ),
     bslib::layout_columns(
       col_widths = c(5, 7),
       bslib::card(
@@ -95,6 +125,58 @@ mod_qa_server <- function(id, app_state) {
       shiny::p(class = "small text-muted",
         "Acting as ", shiny::strong(app_state$user %||% "(unnamed)"),
         " \u2014 role: ", shiny::strong(app_state$role %||% "deidentifier"), ".")
+    })
+
+    # --- teach a format from a survivor (opt-in rule) ----------------------
+    .fmt_samples <- function() {
+      raw <- input$fmt_samples %||% ""
+      s <- trimws(unlist(strsplit(raw, "[\r\n,]+")))
+      s[nzchar(s)]
+    }
+
+    shiny::observeEvent(input$fmt_preview, {
+      if (!isTRUE(app_state$engine$available)) return()
+      s <- .fmt_samples()
+      if (!length(s)) {
+        shiny::showNotification("Enter at least one sample.", type = "warning"); return()
+      }
+      pat <- tryCatch(engine_derive_pattern(s), error = function(e) {
+        shiny::showNotification(conditionMessage(e), type = "error"); NULL })
+      shiny::req(pat)
+      output$fmt_result <- shiny::renderUI(shiny::div(
+        class = "small mt-2",
+        shiny::strong("Derived pattern: "), shiny::tags$code(pat), shiny::br(),
+        shiny::span(class = "text-muted",
+                    sprintf("Matches all %d sample(s). Nothing added yet.", length(s)))))
+    })
+
+    shiny::observeEvent(input$fmt_add, {
+      shiny::req(input$profile); if (!isTRUE(app_state$engine$available)) return()
+      s <- .fmt_samples()
+      if (!length(s)) {
+        shiny::showNotification("Enter at least one sample.", type = "warning"); return()
+      }
+      cat <- gsub("[^A-Za-z0-9_]+", "_", trimws(input$fmt_category %||% "case_number"))
+      if (!nzchar(cat)) cat <- "case_number"
+      res <- tryCatch(
+        engine_add_pattern_rule(input$profile, cat, s, score = input$fmt_score %||% 0.95),
+        error = function(e) { shiny::showNotification(conditionMessage(e), type = "error"); NULL })
+      shiny::req(res)
+      app_state$profiles_version <- (app_state$profiles_version %||% 0L) + 1L
+      # Adding a detection rule during review is a governance action: audit it.
+      tryCatch(audit_append("qa_rule_added",
+                            actor = app_state$user %||% "(unnamed)",
+                            role = app_state$role %||% "reviewer",
+                            details = list(profile = input$profile, category = cat,
+                                           pattern = res$pattern)),
+               error = function(e) NULL)
+      output$fmt_result <- shiny::renderUI(shiny::div(
+        class = "small text-success mt-2",
+        sprintf("Added %s rule to '%s': ", cat, input$profile),
+        shiny::tags$code(res$pattern), shiny::br(),
+        shiny::span("Re-run the residual scan to apply it.")))
+      shiny::showNotification("Rule added. Re-run the residual scan to apply it.",
+                              type = "message", duration = 8)
     })
 
     # Resolve the batch de-identifier for the sign-off gate.
