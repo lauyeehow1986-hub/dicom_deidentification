@@ -35,6 +35,11 @@ param(
 $ErrorActionPreference = "Stop"
 $repo = Split-Path -Parent $PSScriptRoot
 Set-Location $repo
+# PowerShell's Set-Location does NOT change .NET's process current directory, so
+# [System.IO.File]::* calls below resolve relative paths against wherever the
+# process launched (e.g. a git worktree), not $repo. Sync them so relative -Out
+# paths patch the right tree.
+[System.Environment]::CurrentDirectory = (Get-Location).Path
 
 $rscript = (Get-Command Rscript -ErrorAction SilentlyContinue).Source
 if (-not $rscript) {
@@ -43,6 +48,18 @@ if (-not $rscript) {
     if ($cand) { $rscript = $cand.FullName }
 }
 if (-not $rscript) { throw "Rscript not found; install R or add it to PATH." }
+
+# Rscript writes normal progress (pak dependency detection, CRAN download notes)
+# to stderr. Under $ErrorActionPreference='Stop' PowerShell promotes the first
+# such line to a terminating NativeCommandError and aborts the whole build before
+# the $LASTEXITCODE check below can run. Run native R with EAP relaxed so only a
+# real non-zero exit code is treated as failure.
+function Invoke-RNative([string]$expr) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & $rscript -e $expr 2>&1 | ForEach-Object { Write-Host $_ } }
+    finally { $ErrorActionPreference = $prev }
+}
 
 function Robo($src, $dst, [string[]]$xd = @()) {
     if (-not (Test-Path $src)) { Write-Host "  (skip, absent) $src"; return }
@@ -95,7 +112,7 @@ $pkgs = "'shiny','bslib','reticulate','DBI','RSQLite','yaml','jsonlite','digest'
 $rv = if ($RVersion) { ", r_portable_version='$RVersion'" } else { "" }
 $sn = if ($Snapshot) { ", snapshot='$Snapshot'" } else { "" }
 $expr = "shinyalcatraz::build_portable(app_dir='$($AppSrc -replace '\\','/')', out_dir='$($Out -replace '\\','/')', platform='windows', packages=c($pkgs), runtimes='none'$rv$sn)"
-& $rscript -e $expr
+Invoke-RNative $expr
 if ($LASTEXITCODE -ne 0) { throw "build_portable failed (exit $LASTEXITCODE)." }
 if (-not (Test-Path (Join-Path $Out "run_app.R"))) { throw "build_portable produced no run_app.R." }
 
@@ -256,7 +273,7 @@ WriteText (Join-Path $Out "BUNDLE_README.md") $bundleReadme
 # --- 7. checksum manifest for on-target verification -------------------------
 Write-Host "== Writing BUNDLE_MANIFEST.json (checksums every file; may take a minute)"
 $srcR = "for (f in list.files(file.path('$($repo -replace '\\','/')','R'), pattern='[.]R`$', full.names=TRUE)) source(f); bundle_write_manifest('$($Out -replace '\\','/')', meta=list(built_by='build_portable_bundle.ps1', portable_r=TRUE, secrets_included=$([string](-not $SkipSecrets).ToString().ToUpper())))"
-& $rscript -e $srcR
+Invoke-RNative $srcR
 if ($LASTEXITCODE -ne 0) { throw "manifest write failed." }
 
 # tidy the staging tree
