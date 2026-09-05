@@ -104,6 +104,29 @@ mod_rules_editor_ui <- function(id) {
                               icon = shiny::icon("plus"))
         ),
         shiny::uiOutput(ns("fmt_result")),
+        shiny::hr(),
+        shiny::h6("Load a name list — gazetteer (opt-in)"),
+        shiny::p(class = "small text-muted",
+          paste("Upload a CSV or text file of names. Pick the column that holds",
+                "the names and, if the file has a header row, tick to drop it.",
+                "Names are matched whole and case-insensitively — scrubbed at",
+                "de-id and flagged in the QA scan. Multi-column CSVs are fine; only",
+                "the chosen column is used.")),
+        shiny::fileInput(ns("gaz_file"), "Name list (CSV / TSV / TXT)",
+                         accept = c(".csv", ".tsv", ".txt"),
+                         placeholder = "names.csv"),
+        bslib::layout_columns(
+          col_widths = c(7, 5),
+          shiny::selectInput(ns("gaz_col"), "Name column", choices = character(0)),
+          shiny::div(class = "mt-4 pt-2",
+            shiny::checkboxInput(ns("gaz_header"),
+                                 "First row is a header (drop it)", value = TRUE))
+        ),
+        shiny::uiOutput(ns("gaz_preview")),
+        shiny::actionButton(ns("gaz_add"), "Add names to this profile",
+                            class = "btn-success btn-sm",
+                            icon = shiny::icon("address-book")),
+        shiny::uiOutput(ns("gaz_result")),
         shiny::uiOutput(ns("learned")),
         shiny::uiOutput(ns("remove_rule_ui"))
       )
@@ -245,6 +268,114 @@ mod_rules_editor_server <- function(id, app_state) {
         sprintf("Added %s rule to '%s': ", cat, input$profile),
         shiny::tags$code(res$pattern)))
       shiny::showNotification("Rule added to this profile.", type = "message")
+    })
+
+    # --- opt-in: load a name-list gazetteer from an uploaded CSV/TXT --------
+    # Delimiter-sniffing reader: a name-per-line TXT becomes one column; a CSV/TSV
+    # keeps its columns so the user can pick which one holds the names.
+    read_name_table <- function(path) {
+      lines <- tryCatch(readLines(path, n = 100, warn = FALSE, encoding = "UTF-8"),
+                        error = function(e) character(0))
+      nonblank <- lines[nzchar(trimws(lines))]
+      if (!length(nonblank)) return(NULL)
+      first <- nonblank[1]
+      sep <- if (grepl("\t", first, fixed = TRUE)) "\t"
+             else if (grepl(",", first, fixed = TRUE)) ","
+             else if (grepl(";", first, fixed = TRUE)) ";"
+             else NA_character_
+      if (is.na(sep)) {
+        all_lines <- readLines(path, warn = FALSE, encoding = "UTF-8")
+        return(data.frame(V1 = all_lines, stringsAsFactors = FALSE))
+      }
+      tryCatch(
+        utils::read.table(path, header = FALSE, sep = sep, quote = "\"",
+                          stringsAsFactors = FALSE, colClasses = "character",
+                          fill = TRUE, comment.char = "", check.names = FALSE,
+                          encoding = "UTF-8"),
+        error = function(e) NULL)
+    }
+
+    gaz_raw <- shiny::reactiveVal(NULL)  # data.frame, read with header = FALSE
+
+    shiny::observeEvent(input$gaz_file, {
+      shiny::req(input$gaz_file$datapath)
+      tbl <- read_name_table(input$gaz_file$datapath)
+      if (is.null(tbl) || !nrow(tbl)) {
+        shiny::showNotification("Could not read any rows from that file.",
+                                type = "warning")
+        gaz_raw(NULL); return()
+      }
+      gaz_raw(tbl)
+      output$gaz_result <- shiny::renderUI(NULL)  # clear a prior success message
+    })
+
+    # Apply the header toggle: when ticked, row 1 supplies the column labels and
+    # is dropped from the data; otherwise columns are generic and all rows kept.
+    gaz_parsed <- shiny::reactive({
+      tbl <- gaz_raw(); shiny::req(tbl)
+      if (isTRUE(input$gaz_header) && nrow(tbl) >= 1) {
+        cn <- trimws(as.character(unlist(tbl[1, ])))
+        body <- tbl[-1, , drop = FALSE]
+      } else {
+        cn <- character(ncol(tbl))
+        body <- tbl
+      }
+      blank <- is.na(cn) | !nzchar(cn)
+      cn[blank] <- paste("Column", which(blank))
+      names(body) <- make.unique(cn)
+      list(cols = names(body), body = body)
+    })
+
+    shiny::observeEvent(gaz_parsed(), {
+      cols <- gaz_parsed()$cols
+      keep <- shiny::isolate(input$gaz_col)
+      sel <- if (!is.null(keep) && keep %in% cols) keep else cols[1]
+      shiny::updateSelectInput(session, "gaz_col", choices = cols, selected = sel)
+    })
+
+    gaz_names <- shiny::reactive({
+      p <- gaz_parsed(); col <- input$gaz_col
+      shiny::req(col %in% p$cols)
+      v <- trimws(as.character(p$body[[col]]))
+      v <- v[nzchar(v) & !startsWith(v, "#")]
+      unique(v)
+    })
+
+    output$gaz_preview <- shiny::renderUI({
+      if (is.null(gaz_raw())) return(NULL)
+      nm <- tryCatch(gaz_names(), error = function(e) character(0))
+      if (!length(nm))
+        return(shiny::p(class = "small text-warning",
+                        "No names in the selected column (check the header toggle)."))
+      shown <- utils::head(nm, 8)
+      shiny::div(class = "small mt-1",
+        shiny::strong(sprintf("%d name(s) ready. ", length(nm))),
+        shiny::span(class = "text-muted",
+                    paste0("Preview: ", paste(shown, collapse = ", "),
+                           if (length(nm) > length(shown)) " ..." else "")))
+    })
+
+    shiny::observeEvent(input$gaz_add, {
+      shiny::req(input$profile); if (!isTRUE(app_state$engine$available)) return()
+      nm <- tryCatch(gaz_names(), error = function(e) character(0))
+      if (!length(nm)) {
+        shiny::showNotification("No names to add — upload a file and pick a column.",
+                                type = "warning"); return()
+      }
+      res <- tryCatch(engine_add_gazetteer_names(input$profile, nm),
+        error = function(e) {
+          shiny::showNotification(conditionMessage(e), type = "error"); NULL })
+      shiny::req(res)
+      current(engine_profile_get(input$profile))
+      app_state$profiles_version <- (app_state$profiles_version %||% 0L) + 1L
+      if (identical(input$profile, app_state$profile_id)) app_state$profile <- current()
+      output$gaz_result <- shiny::renderUI(shiny::div(
+        class = "small text-success mt-2",
+        sprintf("Added %d new name(s) to '%s' (%d skipped as duplicates; %d in the list now).",
+                res$added %||% 0L, input$profile, res$skipped %||% 0L, res$total %||% 0L)))
+      shiny::showNotification(
+        sprintf("Gazetteer updated: %d added, %d total.",
+                res$added %||% 0L, res$total %||% 0L), type = "message")
     })
 
     output$remove_rule_ui <- shiny::renderUI({

@@ -1034,6 +1034,53 @@ def add_pattern_rule(profile_id: str, category: str, samples,
             "profile_path": saved.get("path")}
 
 
+def add_gazetteer_names(profile_id: str, names) -> dict:
+    """OPT-IN: install a list of ``names`` into the project's WORKSPACE gazetteer
+    and wire that file into the profile's ``extra_gazetteer_files`` (never the
+    shipped default). Idempotent: blank/``#``-comment lines are dropped and names
+    already present (case-insensitively) are skipped.
+
+    A UI parses a CSV (column pick + drop-header) down to this plain list; the
+    engine stays format-agnostic. Installed names scrub at de-id time and fail
+    the residual QA scan, exactly like a tagging-grown gazetteer.
+
+    Returns ``added`` (new names written), ``skipped``, ``total`` (names in the
+    file after), the gazetteer ``path`` and the saved ``profile_path``. Raises
+    ``ValueError`` if no usable names remain after cleaning.
+    """
+    cleaned, seen = [], set()
+    for n in (names or []):
+        s = str(n).strip()
+        if not s or s.startswith("#"):
+            continue
+        k = s.lower()
+        if k not in seen:
+            seen.add(k)
+            cleaned.append(s)
+    if not cleaned:
+        raise ValueError("no names to add (all blank or comments)")
+
+    gfile = _workspace.gazetteers_dir() / f"{profile_id}_custom.txt"
+    before = len(_workspace._existing_names(gfile))
+    gpath = gfile
+    for s in cleaned:
+        gpath = _workspace.append_gazetteer(f"{profile_id}_custom", s)
+    total = len(_workspace._existing_names(gfile))
+    added = total - before
+
+    prof = profile_get(profile_id)
+    prof.pop("_source", None)
+    td = prof.setdefault("text_detection", {})
+    extra = td.setdefault("extra_gazetteer_files", [])
+    wired = str(gpath) not in extra
+    if wired:
+        extra.append(str(gpath))
+    saved = profile_save(profile_id, prof)  # ensure the workspace copy persists
+    return {"profile_id": profile_id, "path": str(gpath), "added": added,
+            "skipped": len(cleaned) - added, "total": total, "wired": wired,
+            "profile_path": saved.get("path")}
+
+
 def remove_custom_rule(profile_id: str, category: str | None = None,
                        pattern: str | None = None) -> dict:
     """Reverse an opt-in rule: drop custom_regex rules on the WORKSPACE profile

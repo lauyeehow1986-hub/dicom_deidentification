@@ -30,6 +30,11 @@ from .core import (
     profile_clone,       # Phase 4
     tag_capture,         # Phase 4 (tag-a-miss self-improvement)
     ner_export_examples, # Phase 4 (NER fine-tuning hook, stub)
+    derive_pattern,      # Phase 4 (opt-in: preview a learned regex)
+    add_pattern_rule,    # Phase 4 (opt-in: install a site-specific format)
+    add_gazetteer_names, # Phase 4 (opt-in: install a name-list gazetteer)
+    remove_custom_rule,  # Phase 4 (opt-in: reverse a learned rule)
+    list_custom_rules,   # Phase 4 (opt-in: rules in effect for a profile)
     scan_residual,       # Phase 6
     scan_residual_dir,   # Phase 6
     read_metadata,       # Phase 6.5 (reviewer metadata view)
@@ -61,6 +66,11 @@ __all__ = [
     "profile_clone",
     "tag_capture",
     "ner_export_examples",
+    "derive_pattern",
+    "add_pattern_rule",
+    "add_gazetteer_names",
+    "remove_custom_rule",
+    "list_custom_rules",
     "scan_residual",
     "scan_residual_dir",
     "read_metadata",

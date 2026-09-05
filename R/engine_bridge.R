@@ -153,6 +153,14 @@ engine_add_pattern_rule <- function(profile_id, category, samples, score = 0.95)
   call_engine("add_pattern_rule", profile_id, category, as.list(samples), score)
 }
 
+#' Install a list of names into the WORKSPACE gazetteer for a profile (opt-in).
+#' `names` is a character vector (one name per entry) already parsed from a CSV
+#' (column pick + header drop happen in the UI). Returns list(added, skipped,
+#' total, path, wired, profile_path). Names then scrub at de-id and fail QA.
+engine_add_gazetteer_names <- function(profile_id, names) {
+  call_engine("add_gazetteer_names", profile_id, as.list(names))
+}
+
 #' Reverse an opt-in rule by category and/or exact pattern (workspace profile).
 engine_remove_custom_rule <- function(profile_id, category = NULL, pattern = NULL) {
   call_engine("remove_custom_rule", profile_id, category, pattern)
