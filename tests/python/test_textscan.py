@@ -167,3 +167,60 @@ def test_header_token_layer_flags_known_values_as_name():
     texts = {s.text for s in spans}
     assert "Muthusamy" in texts
     assert "MRN0099887" in texts
+
+
+# --- SG short-forms + full Chinese names: recall & the deterministic gap -----
+# These pin the MODEL-INDEPENDENT guarantees. When the name is the study's own
+# registered PatientName, the header scrub owns it deterministically (score 1.0)
+# in any case. When it is an UNLISTED bystander name, the deterministic layers
+# alone miss it -- it needs a gazetteer entry (below) or the probabilistic
+# Presidio/NER layers (covered by the capability-gated tests, not here).
+
+def test_header_scrub_catches_shortform_in_any_case():
+    # A short-form like "Yeo KK" registered in the header is scrubbed wherever it
+    # appears, regardless of the casing typed into free text.
+    scanner = ts.TextScanner(known_values=["Yeo KK"], gazetteer=None,
+                             use_presidio=False, use_ner=False)
+    spans = [s for s in scanner.scan("Report for yeo kk. Echo normal.")
+             if s.category == "name"]
+    assert len(spans) == 1
+    assert spans[0].source == "header"
+    assert spans[0].score == 1.0
+
+
+def test_header_scrub_catches_full_chinese_name_lowercase():
+    scanner = ts.TextScanner(known_values=["Tan Chorh Chuan"], gazetteer=None,
+                             use_presidio=False, use_ner=False)
+    spans = [s for s in scanner.scan("seen: tan chorh chuan today")
+             if s.category == "name"]
+    assert len(spans) == 1
+    assert spans[0].source == "header" and spans[0].score == 1.0
+
+
+def test_gazetteer_catches_shortform_when_listed():
+    # The gazetteer is how you make an unregistered short-form a deterministic
+    # catch: list "Yeo KK" and it fires case-insensitively.
+    gaz = ts.Gazetteer(["Yeo KK"])
+    spans = gaz.find("aka yeo kk")
+    assert len(spans) == 1
+    assert spans[0].text.lower() == "yeo kk"
+    assert spans[0].source == "gazetteer"
+
+
+def test_gazetteer_full_name_does_not_catch_bare_surname():
+    # Whole-phrase matching is deliberate: a full-name entry must NOT redact a
+    # lone common surname (listing every "Tan" would over-redact). The bare
+    # surname of the actual patient is covered by the per-study header scrub.
+    gaz = ts.Gazetteer(["Tan Chorh Chuan"])
+    assert gaz.find("Mr Tan came in for an echo") == []
+
+
+def test_deterministic_layers_alone_miss_unlisted_bystander_name():
+    # An unlisted bystander name (e.g. a referring doctor) in free text produces
+    # NO name span from the deterministic layers -- documenting exactly why the
+    # probabilistic layers exist and why a real name list should be loaded.
+    scanner = ts.TextScanner(known_values=[], gazetteer=None,
+                             use_presidio=False, use_ner=False)
+    spans = [s for s in scanner.scan("Referred by Dr Tan Chorh Chuan for MRI.")
+             if s.category == "name"]
+    assert spans == []
