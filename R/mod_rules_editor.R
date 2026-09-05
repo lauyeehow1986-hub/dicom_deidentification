@@ -79,7 +79,33 @@ mod_rules_editor_ui <- function(id) {
                      "Gazetteers and custom-regex rules are grown in the Tagging tab; the read-outs below reflect this project.")
           )
         ),
-        shiny::uiOutput(ns("learned"))
+        shiny::hr(),
+        shiny::h6("Teach a site-specific format (opt-in)"),
+        shiny::p(class = "small text-muted",
+          paste("Paste one or more sample identifiers of the SAME shape (e.g. a",
+                "case or accession number). The engine derives a regex that",
+                "scrubs matching values at de-id time and flags them in the QA",
+                "scan. Samples are used only to derive the pattern — they are",
+                "not stored.")),
+        bslib::layout_columns(
+          col_widths = c(5, 4, 3),
+          shiny::textAreaInput(ns("fmt_samples"), "Sample(s), one per line",
+                               rows = 2, placeholder = "e.g. 324-58-2995"),
+          shiny::textInput(ns("fmt_category"), "Category", value = "case_number"),
+          shiny::numericInput(ns("fmt_score"), "Score", value = 0.95,
+                              min = 0.5, max = 1, step = 0.05)
+        ),
+        shiny::div(
+          shiny::actionButton(ns("fmt_preview"), "Preview rule",
+                              class = "btn-outline-secondary btn-sm",
+                              icon = shiny::icon("wand-magic-sparkles")),
+          shiny::actionButton(ns("fmt_add"), "Add to this profile",
+                              class = "btn-success btn-sm ms-1",
+                              icon = shiny::icon("plus"))
+        ),
+        shiny::uiOutput(ns("fmt_result")),
+        shiny::uiOutput(ns("learned")),
+        shiny::uiOutput(ns("remove_rule_ui"))
       )
     )
   )
@@ -87,6 +113,7 @@ mod_rules_editor_ui <- function(id) {
 
 mod_rules_editor_server <- function(id, app_state) {
   shiny::moduleServer(id, function(input, output, session) {
+    ns <- session$ns
     current <- shiny::reactiveVal(NULL)   # the loaded profile (a list)
     status  <- shiny::reactiveVal(NULL)
 
@@ -172,6 +199,80 @@ mod_rules_editor_server <- function(id, app_state) {
           lapply(rx, function(r) shiny::tags$li(sprintf("%s: %s",
                                                         r$category %||% "?", r$pattern %||% ""))))
       )
+    })
+
+    # --- opt-in: teach a site-specific format ------------------------------
+    .fmt_samples <- function() {
+      raw <- input$fmt_samples %||% ""
+      s <- trimws(unlist(strsplit(raw, "[\r\n,]+")))
+      s[nzchar(s)]
+    }
+
+    shiny::observeEvent(input$fmt_preview, {
+      if (!isTRUE(app_state$engine$available)) return()
+      s <- .fmt_samples()
+      if (!length(s)) {
+        shiny::showNotification("Enter at least one sample.", type = "warning"); return()
+      }
+      pat <- tryCatch(engine_derive_pattern(s), error = function(e) {
+        shiny::showNotification(conditionMessage(e), type = "error"); NULL })
+      shiny::req(pat)
+      output$fmt_result <- shiny::renderUI(shiny::div(
+        class = "small mt-2",
+        shiny::strong("Derived pattern: "), shiny::tags$code(pat), shiny::br(),
+        shiny::span(class = "text-muted",
+                    sprintf("Matches all %d sample(s). Nothing added yet — click 'Add'.",
+                            length(s)))))
+    })
+
+    shiny::observeEvent(input$fmt_add, {
+      shiny::req(input$profile); if (!isTRUE(app_state$engine$available)) return()
+      s <- .fmt_samples()
+      if (!length(s)) {
+        shiny::showNotification("Enter at least one sample.", type = "warning"); return()
+      }
+      cat <- gsub("[^A-Za-z0-9_]+", "_", trimws(input$fmt_category %||% "case_number"))
+      if (!nzchar(cat)) cat <- "case_number"
+      res <- tryCatch(
+        engine_add_pattern_rule(input$profile, cat, s, score = input$fmt_score %||% 0.95),
+        error = function(e) { shiny::showNotification(conditionMessage(e), type = "error"); NULL })
+      shiny::req(res)
+      current(engine_profile_get(input$profile))
+      app_state$profiles_version <- (app_state$profiles_version %||% 0L) + 1L
+      if (identical(input$profile, app_state$profile_id)) app_state$profile <- current()
+      output$fmt_result <- shiny::renderUI(shiny::div(
+        class = "small text-success mt-2",
+        sprintf("Added %s rule to '%s': ", cat, input$profile),
+        shiny::tags$code(res$pattern)))
+      shiny::showNotification("Rule added to this profile.", type = "message")
+    })
+
+    output$remove_rule_ui <- shiny::renderUI({
+      prof <- current(); if (is.null(prof)) return(NULL)
+      rx <- (prof$text_detection %||% list())$custom_regex %||% list()
+      if (!length(rx)) return(NULL)
+      choices <- vapply(rx, function(r) r$pattern %||% "", character(1))
+      names(choices) <- vapply(rx, function(r)
+        sprintf("%s: %s", r$category %||% "?", r$pattern %||% ""), character(1))
+      shiny::div(class = "mt-2",
+        shiny::selectInput(ns("rm_rule_sel"), "Remove a rule", choices = choices),
+        shiny::actionButton(ns("rm_rule"), "Remove selected rule",
+                            class = "btn-outline-danger btn-sm",
+                            icon = shiny::icon("trash")))
+    })
+
+    shiny::observeEvent(input$rm_rule, {
+      shiny::req(input$profile, input$rm_rule_sel)
+      if (!isTRUE(app_state$engine$available)) return()
+      res <- tryCatch(
+        engine_remove_custom_rule(input$profile, pattern = input$rm_rule_sel),
+        error = function(e) { shiny::showNotification(conditionMessage(e), type = "error"); NULL })
+      shiny::req(res)
+      current(engine_profile_get(input$profile))
+      app_state$profiles_version <- (app_state$profiles_version %||% 0L) + 1L
+      if (identical(input$profile, app_state$profile_id)) app_state$profile <- current()
+      shiny::showNotification(sprintf("Removed %d rule(s).", res$removed %||% 0L),
+                              type = "message")
     })
 
     # Collect the form back into the loaded profile, preserving fields we don't edit.

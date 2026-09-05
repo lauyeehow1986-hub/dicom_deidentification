@@ -333,6 +333,88 @@ class TextScanner:
         return "".join(out), spans
 
 
+# --------------------------------------------------------------------------- #
+# Learn a regex from example identifiers (opt-in site-specific formats)        #
+# --------------------------------------------------------------------------- #
+
+def _char_kind(ch: str) -> str:
+    if ch.isdigit():
+        return "d"
+    if ch.isascii() and ch.isalpha():
+        return "a"
+    return "sep"
+
+
+def _tokenize_sample(sample: str) -> list:
+    """Split a sample into structural tokens: ('d', run_len) for a digit run,
+    ('a', run_len) for an ASCII-letter run, ('sep', char) for anything else
+    (kept per-character so mixed separators like '-' and '/' stay distinct)."""
+    tokens: list = []
+    i, n = 0, len(sample)
+    while i < n:
+        kind = _char_kind(sample[i])
+        if kind == "sep":
+            tokens.append(("sep", sample[i]))
+            i += 1
+        else:
+            j = i
+            while j < n and _char_kind(sample[j]) == kind:
+                j += 1
+            tokens.append((kind, j - i))
+            i = j
+    return tokens
+
+
+def _skeleton(tokens: list) -> tuple:
+    """Structural key that ignores run LENGTHS (so '1234567' and '12345678' share
+    a skeleton) but keeps separator literals (so '-' vs '/' do not)."""
+    return tuple((t[0], t[1]) if t[0] == "sep" else (t[0],) for t in tokens)
+
+
+def derive_pattern(samples, anchor: bool = True) -> str:
+    """Infer a regex from one or more SAMPLE identifiers by structure.
+
+    Each maximal digit run becomes ``\\d{n}``, each ASCII-letter run
+    ``[A-Za-z]{n}`` (case-insensitive by class), and every other character its
+    escaped literal. Given several samples of the SAME shape, run lengths widen
+    to ``{min,max}``. Word boundaries anchor the ends so the format is matched as
+    a whole token, not inside a longer digit/letter run.
+
+    Raises ``ValueError`` if there is no sample, or the samples do not share one
+    structural skeleton (teach those as separate rules instead of one fuzzy one).
+    """
+    cleaned = [s.strip() for s in (samples or []) if s and s.strip()]
+    if not cleaned:
+        raise ValueError("derive_pattern needs at least one non-empty sample")
+    toks = [_tokenize_sample(s) for s in cleaned]
+    skel0 = _skeleton(toks[0])
+    for t in toks[1:]:
+        if _skeleton(t) != skel0:
+            raise ValueError(
+                "samples do not share one structural format; give samples of the "
+                "same shape, or add a separate rule for each format")
+    parts: list[str] = []
+    for pos, base in enumerate(toks[0]):
+        if base[0] == "sep":
+            parts.append(re.escape(base[1]))
+            continue
+        lengths = [toks[k][pos][1] for k in range(len(toks))]
+        mn, mx = min(lengths), max(lengths)
+        cls = r"\d" if base[0] == "d" else "[A-Za-z]"
+        if mn == mx == 1:
+            parts.append(cls)
+        elif mn == mx:
+            parts.append(f"{cls}{{{mn}}}")
+        else:
+            parts.append(f"{cls}{{{mn},{mx}}}")
+    body = "".join(parts)
+    if anchor:
+        left = r"\b" if toks[0][0][0] in ("d", "a") else ""
+        right = r"\b" if toks[0][-1][0] in ("d", "a") else ""
+        body = f"{left}{body}{right}"
+    return body
+
+
 def _merge(spans: list[PhiSpan]) -> list[PhiSpan]:
     """Sort by position and collapse overlapping spans, keeping the widest/most
     confident. Prevents double-redaction when layers agree on the same text."""

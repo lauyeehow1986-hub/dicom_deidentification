@@ -997,6 +997,76 @@ def tag_capture(category: str, value: str, profile_id: str = "default",
     return result
 
 
+def derive_pattern(samples, anchor: bool = True) -> str:
+    """Infer a regex from example identifiers (see textscan.derive_pattern). Thin
+    re-export so the R side can preview a rule before installing it."""
+    return _textscan.derive_pattern(samples, anchor=anchor)
+
+
+def add_pattern_rule(profile_id: str, category: str, samples,
+                     score: float = 0.95) -> dict:
+    """OPT-IN: learn a regex from ``samples`` and install it as a ``custom_regex``
+    rule on a WORKSPACE copy of the profile (never the shipped default).
+
+    The rule then scrubs matching text at de-id time (fields with action ``C``)
+    and fails the residual QA scan as a confident hit. Returns the derived
+    ``pattern``, whether it re-matches every sample, and the saved profile path.
+    Raises ``ValueError`` via ``derive_pattern`` on empty/inconsistent samples.
+    """
+    pattern = _textscan.derive_pattern(samples)
+    rx = re.compile(pattern)
+    cleaned = [s.strip() for s in (samples or []) if s and s.strip()]
+    matched = all(rx.search(s) for s in cleaned)
+
+    prof = profile_get(profile_id)
+    prof.pop("_source", None)
+    td = prof.setdefault("text_detection", {})
+    rules_list = td.setdefault("custom_regex", [])
+    entry = {"category": category, "pattern": pattern, "score": float(score)}
+    added = entry not in rules_list
+    if added:
+        rules_list.append(entry)
+        saved = profile_save(profile_id, prof)
+    else:
+        saved = {"path": str(_workspace_profile_path(profile_id))}
+    return {"profile_id": profile_id, "category": category, "pattern": pattern,
+            "score": float(score), "matched": matched, "added": added,
+            "profile_path": saved.get("path")}
+
+
+def remove_custom_rule(profile_id: str, category: str | None = None,
+                       pattern: str | None = None) -> dict:
+    """Reverse an opt-in rule: drop custom_regex rules on the WORKSPACE profile
+    matching ``category`` and/or ``pattern`` (both given -> both must match; give
+    neither and nothing is removed). No-op if the profile has no workspace copy."""
+    wp = _workspace_profile_path(profile_id)
+    if not wp.exists():
+        return {"profile_id": profile_id, "removed": 0, "profile_path": None}
+    prof = profile_get(profile_id)
+    prof.pop("_source", None)
+    td = prof.setdefault("text_detection", {})
+    rules_list = td.get("custom_regex") or []
+    if category is None and pattern is None:
+        return {"profile_id": profile_id, "removed": 0, "profile_path": str(wp)}
+
+    def _keep(r: dict) -> bool:
+        hit = ((category is None or r.get("category") == category) and
+               (pattern is None or r.get("pattern") == pattern))
+        return not hit
+    kept = [r for r in rules_list if _keep(r)]
+    removed = len(rules_list) - len(kept)
+    td["custom_regex"] = kept
+    saved = profile_save(profile_id, prof)
+    return {"profile_id": profile_id, "removed": removed,
+            "profile_path": saved["path"]}
+
+
+def list_custom_rules(profile_id: str = "default") -> list:
+    """The custom_regex rules currently in effect for a profile (for the editor)."""
+    td = profile_get(profile_id).get("text_detection") or {}
+    return list(td.get("custom_regex") or [])
+
+
 def ner_export_examples(out_path: str | None = None) -> dict:
     """Fine-tuning HOOK (stub): turn captured labeled examples into a training-
     ready JSON-lines file (``{"text", "entities":[[start,end,LABEL]]}``). It does

@@ -156,29 +156,11 @@ def test_scan_result_tags_confident_and_counts(tmp_path):
     assert res["passed"] is False
 
 
-def test_case_number_format_is_caught_as_confident(tmp_path):
-    # A surviving NNN-NN-NNNN case/accession number (SSN-shaped) must be caught
-    # deterministically by the default profile's custom_regex, as a CONFIDENT
-    # `case_number` hit -- not left to the (now demoted) ML PERSON layer, which
-    # in this engine only guesses names and never fires on a bare number.
-    p = _write(tmp_path / "case.dcm",
-               derivation="Ref 324-58-2995/4 pending review")
-    res = core.scan_residual(p)
-    assert res["passed"] is False
-    assert res["by_category"].get("case_number", 0) >= 1
-    hit = next(f for f in res["findings"] if f["category"] == "case_number")
-    assert hit["source"] == "custom_regex"
-    assert hit["confident"] is True
-    assert "324-58-2995" not in hit["preview"]   # still masked in the report
-
-
-def test_case_number_regex_does_not_match_plain_digit_runs(tmp_path):
-    # The rule is specific to the 3-2-4 dashed grouping; a longer plain number
-    # (e.g. a device serial) must NOT trip it.
-    p = _write(tmp_path / "serial.dcm",
-               derivation="Device serial 1234567890 calibrated")
-    res = core.scan_residual(p)
-    assert res["by_category"].get("case_number", 0) == 0
+def test_default_profile_ships_no_custom_regex():
+    # The case-number rule is OPT-IN: the shipped default must carry no
+    # site-specific custom_regex, so no numeric format is scrubbed by surprise.
+    td = core.profile_get("default").get("text_detection") or {}
+    assert (td.get("custom_regex") or []) == []
 
 
 def test_pixel_scan_degrades_without_ocr(tmp_path):

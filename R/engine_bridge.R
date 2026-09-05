@@ -138,6 +138,31 @@ engine_ner_export <- function(out_path = NULL) {
   call_engine("ner_export_examples", out_path)
 }
 
+#' Opt-in site-specific formats: learn a regex from sample identifiers.
+
+#' Preview the regex derived from one or more sample identifiers (no install).
+#' `samples` is a character vector of same-shaped examples (e.g. a case number).
+engine_derive_pattern <- function(samples) {
+  call_engine("derive_pattern", as.list(samples))
+}
+
+#' Install a derived rule as a custom_regex on the WORKSPACE profile (opt-in).
+#' Returns list(pattern, matched, added, profile_path, ...). Scrubs matching text
+#' at de-id time and fails the residual QA scan as a confident hit.
+engine_add_pattern_rule <- function(profile_id, category, samples, score = 0.95) {
+  call_engine("add_pattern_rule", profile_id, category, as.list(samples), score)
+}
+
+#' Reverse an opt-in rule by category and/or exact pattern (workspace profile).
+engine_remove_custom_rule <- function(profile_id, category = NULL, pattern = NULL) {
+  call_engine("remove_custom_rule", profile_id, category, pattern)
+}
+
+#' The custom_regex rules in effect for a profile (for the rules editor).
+engine_list_custom_rules <- function(profile_id = "default") {
+  call_engine("list_custom_rules", profile_id)
+}
+
 #' Phase 6 QA: re-run the detectors on an OUTPUT and report residual PHI.
 #' Returns the per-file residual report (masked previews, per-category counts,
 #' pass/fail verdict) as an R list. Deterministic hits fail the verdict at
