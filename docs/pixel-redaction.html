@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pixel / burned-in PHI (Phase 3) — DICOM De-Identification</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --surface:#ffffff; --surface-2:#eef1f5; --ink:#1a2230; --muted:#5a6675;
+    --line:#dce1e8; --accent:#1f6feb; --accent-ink:#ffffff; --ok:#1f8f4e; --ok-bg:#e6f4ea;
+    --warn-bg:#fdebd8; --warn-ink:#8a4b12; --code-bg:#0f1523; --code-ink:#e7ecf3;
+    --shadow:0 1px 2px rgba(16,24,40,.06),0 6px 20px rgba(16,24,40,.06); --radius:14px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0e1116; --surface:#161b22; --surface-2:#1c232d; --ink:#e7ecf3; --muted:#9aa7b6;
+      --line:#2a323d; --accent:#4d9dff; --accent-ink:#08111f; --ok:#5ed08c; --ok-bg:#12321f;
+      --warn-bg:#3a2a16; --warn-ink:#f2c489; --code-bg:#0a0e16; --code-ink:#e7ecf3;
+      --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:860px;margin:0 auto;padding:0 20px}
+
+  .topbar{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--surface) 88%,transparent);
+    backdrop-filter:saturate(1.4) blur(8px);border-bottom:1px solid var(--line)}
+  .topbar .wrap{max-width:1040px;display:flex;align-items:center;justify-content:space-between;
+    height:52px;gap:16px}
+  .topbar a{color:var(--ink)}
+  .home{font-weight:600;display:inline-flex;align-items:center;gap:.45em}
+  .home .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);
+    box-shadow:0 0 0 3px var(--ok-bg);display:inline-block}
+  .topnav{display:flex;gap:18px;font-size:.9rem;flex-wrap:wrap}
+  .topnav a{color:var(--muted)}
+  .topnav a:hover{color:var(--ink)}
+
+  main{padding:36px 0 72px}
+  .doc h1{font-size:clamp(1.7rem,4vw,2.4rem);line-height:1.15;letter-spacing:-.02em;margin:.1em 0 .5em}
+  .doc h2{font-size:1.4rem;letter-spacing:-.01em;margin:1.9em 0 .5em;padding-bottom:.25em;
+    border-bottom:1px solid var(--line)}
+  .doc h3{font-size:1.12rem;margin:1.5em 0 .4em}
+  .doc h4{font-size:1rem;margin:1.3em 0 .3em;color:var(--muted)}
+  .doc p{margin:.7em 0}
+  .doc ul,.doc ol{padding-left:1.4em;margin:.6em 0}
+  .doc li{margin:.3em 0}
+  .doc li>p{margin:.3em 0}
+  .doc code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    font-size:.88em;background:var(--surface-2);border:1px solid var(--line);
+    border-radius:6px;padding:.08em .38em}
+  .doc pre{background:var(--code-bg);color:var(--code-ink);border-radius:12px;padding:16px 18px;
+    overflow-x:auto;font-size:.88rem;line-height:1.55;border:1px solid var(--line)}
+  .doc pre code{background:none;border:0;padding:0;color:inherit;font-size:1em}
+  .doc blockquote{margin:1.1em 0;background:var(--warn-bg);color:var(--warn-ink);
+    border-radius:10px;border:0;padding:12px 18px}
+  .doc blockquote p{margin:.3em 0}
+  .doc blockquote strong{color:var(--warn-ink)}
+  .doc table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.94rem;
+    display:block;overflow-x:auto}
+  .doc th,.doc td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  .doc th{background:var(--surface-2);font-weight:600}
+  .doc tr:nth-child(even) td{background:color-mix(in srgb,var(--surface-2) 45%,transparent)}
+  .doc hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+  .doc img{max-width:100%;height:auto;border-radius:10px}
+  .doc a{border-bottom:1px solid color-mix(in srgb,var(--accent) 35%,transparent)}
+  .doc a:hover{text-decoration:none;border-bottom-color:var(--accent)}
+
+  .pagefoot{max-width:860px;margin:52px auto 0;padding:20px 20px 0;border-top:1px solid var(--line);
+    color:var(--muted);font-size:.88rem}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="wrap">
+    <a class="home" href="index.html"><span class="dot"></span> DICOM De-Identification</a>
+    <nav class="topnav">
+        <a href="roadmap.html">Roadmap</a>
+        <a href="airgap-install.html">Air-gap install</a>
+        <a href="security-model.html">Security model</a>
+        <a href="ps315-mapping.html">PS3.15 mapping</a>
+        <a href="text-detection.html">Text PHI</a>
+        <a href="pixel-redaction.html">Pixel redaction</a>
+        <a href="qa-governance.html">QA & governance</a>
+        <a href="projects-integrity-signing.html">Projects & signing</a>
+        <a href="bulk-engine.html">Bulk engine</a>
+    </nav>
+  </div>
+</div>
+<main>
+  <article class="doc wrap">
+<h1>Pixel / burned-in PHI (Phase 3)</h1>
+<p>PHI is often <em>burned into the pixels</em> — a patient-name banner on an echo frame, an
+annotation on a secondary capture. Phase 3 adds decoding, review, and redaction of
+image data, producing valid, viewable DICOM.</p>
+<h2>Pipeline</h2>
+<pre><code>decode frames (mono/RGB, single/multiframe, JPEG2000/JPEG-LS/RLE via pylibjpeg/gdcm)
+  -&gt; OCR each frame (optional; Tesseract) -&gt; scan words with the Phase-2 text scanner
+  -&gt; propose redaction boxes; reviewer adds/edits manual boxes
+  -&gt; black out boxes (per-frame or across frames), strip audio/waveform
+  -&gt; write valid DICOM (decompress -&gt; redact -&gt; Explicit VR Little Endian)
+</code></pre>
+<p>Everything except the OCR step needs no external binary. OCR (<code>ocr_phi_boxes</code>)
+degrades gracefully when the <strong>Tesseract</strong> binary is absent — it returns no boxes
+and a note, exactly like the Presidio/NER layers — so manual-box redaction always
+works. On the air-gapped box, drop a portable Tesseract binary on PATH to enable
+auto-proposals.</p>
+<h2>Why decompress on write</h2>
+<p>A compressed input (JPEG2000 lossy/lossless, JPEG-LS, RLE) is decoded, redacted,
+and written back as <strong>uncompressed</strong> Explicit VR Little Endian. This guarantees a
+valid, viewable object without needing a matching re-encoder for every transfer
+syntax. The output is larger; re-encoding back to the original syntax is a possible
+later optimisation. The change is reported (<code>decompressed: true</code>).</p>
+<h2>The Pixels tab</h2>
+<p><code>R/mod_pixels.R</code> drives the engine entries:</p>
+<ul>
+<li><code>pixel_info(path)</code> — geometry + OCR-proposed boxes.</li>
+<li><code>pixel_frame_png(path, frame, boxes)</code> — a base64 PNG of a frame with boxes drawn
+as red outlines, for review before applying.</li>
+<li><code>pixel_redact(input, output, boxes)</code> — apply boxes + strip audio; write valid DICOM.</li>
+</ul>
+<p><strong>Order matters:</strong> the Pixels tab redacts pixels and strips audio only — it does
+<strong>not</strong> de-identify metadata. Run the <strong>Interactive</strong> metadata de-id first, then load
+its output into the Pixels tab for burned-in review. The QA phase re-scans outputs
+for any residual PHI in metadata <em>and</em> pixels.</p>
+<h2>Audio / waveform</h2>
+<p><code>strip_waveforms</code> removes <code>WaveformSequence</code> (voice/ECG is biometric PHI). The
+metadata pass also removes it via the catalog (<code>biometrics</code> -&gt; X); Phase 3 fixed the
+walker so an explicit X/Z on a sequence removes the whole sequence instead of
+recursing into it.</p>
+<h2>NIfTI burned-in text</h2>
+<p>Burned-in-text OCR now runs on NIfTI volumes too (previously header-only). Each
+in-plane slice (along the volume’s shortest axis) is OCR’d with the same SG-aware
+scanner as DICOM pixels. The interactive flow proposes boxes for confirmation;
+bulk/acceptance runs auto-redact. Degrades to a noted skip without Tesseract.</p>
+<p>The residual-PHI QA scan is likewise NIfTI-aware: it re-checks NIfTI outputs’
+header fields and (when Tesseract is present) OCR-scans their slices, so a
+surviving burned-in identifier is caught by the same pass/fail report as DICOM.</p>
+
+  </article>
+  <div class="pagefoot">
+    <a href="index.html">&larr; Back to the run guide</a> &nbsp;·&nbsp;
+    <a href="https://github.com/lauyeehow1986-hub/dicom_deidentification">GitHub repository</a><br>
+    Research / educational de-identification tool — not for diagnosis or clinical decision-making.
+    Documentation reflects synthetic data only.
+  </div>
+</main>
+</body>
+</html>

@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Projects, integrity & signing (Phase 6.5) — DICOM De-Identification</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --surface:#ffffff; --surface-2:#eef1f5; --ink:#1a2230; --muted:#5a6675;
+    --line:#dce1e8; --accent:#1f6feb; --accent-ink:#ffffff; --ok:#1f8f4e; --ok-bg:#e6f4ea;
+    --warn-bg:#fdebd8; --warn-ink:#8a4b12; --code-bg:#0f1523; --code-ink:#e7ecf3;
+    --shadow:0 1px 2px rgba(16,24,40,.06),0 6px 20px rgba(16,24,40,.06); --radius:14px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0e1116; --surface:#161b22; --surface-2:#1c232d; --ink:#e7ecf3; --muted:#9aa7b6;
+      --line:#2a323d; --accent:#4d9dff; --accent-ink:#08111f; --ok:#5ed08c; --ok-bg:#12321f;
+      --warn-bg:#3a2a16; --warn-ink:#f2c489; --code-bg:#0a0e16; --code-ink:#e7ecf3;
+      --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:860px;margin:0 auto;padding:0 20px}
+
+  .topbar{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--surface) 88%,transparent);
+    backdrop-filter:saturate(1.4) blur(8px);border-bottom:1px solid var(--line)}
+  .topbar .wrap{max-width:1040px;display:flex;align-items:center;justify-content:space-between;
+    height:52px;gap:16px}
+  .topbar a{color:var(--ink)}
+  .home{font-weight:600;display:inline-flex;align-items:center;gap:.45em}
+  .home .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);
+    box-shadow:0 0 0 3px var(--ok-bg);display:inline-block}
+  .topnav{display:flex;gap:18px;font-size:.9rem;flex-wrap:wrap}
+  .topnav a{color:var(--muted)}
+  .topnav a:hover{color:var(--ink)}
+
+  main{padding:36px 0 72px}
+  .doc h1{font-size:clamp(1.7rem,4vw,2.4rem);line-height:1.15;letter-spacing:-.02em;margin:.1em 0 .5em}
+  .doc h2{font-size:1.4rem;letter-spacing:-.01em;margin:1.9em 0 .5em;padding-bottom:.25em;
+    border-bottom:1px solid var(--line)}
+  .doc h3{font-size:1.12rem;margin:1.5em 0 .4em}
+  .doc h4{font-size:1rem;margin:1.3em 0 .3em;color:var(--muted)}
+  .doc p{margin:.7em 0}
+  .doc ul,.doc ol{padding-left:1.4em;margin:.6em 0}
+  .doc li{margin:.3em 0}
+  .doc li>p{margin:.3em 0}
+  .doc code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    font-size:.88em;background:var(--surface-2);border:1px solid var(--line);
+    border-radius:6px;padding:.08em .38em}
+  .doc pre{background:var(--code-bg);color:var(--code-ink);border-radius:12px;padding:16px 18px;
+    overflow-x:auto;font-size:.88rem;line-height:1.55;border:1px solid var(--line)}
+  .doc pre code{background:none;border:0;padding:0;color:inherit;font-size:1em}
+  .doc blockquote{margin:1.1em 0;background:var(--warn-bg);color:var(--warn-ink);
+    border-radius:10px;border:0;padding:12px 18px}
+  .doc blockquote p{margin:.3em 0}
+  .doc blockquote strong{color:var(--warn-ink)}
+  .doc table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.94rem;
+    display:block;overflow-x:auto}
+  .doc th,.doc td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  .doc th{background:var(--surface-2);font-weight:600}
+  .doc tr:nth-child(even) td{background:color-mix(in srgb,var(--surface-2) 45%,transparent)}
+  .doc hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+  .doc img{max-width:100%;height:auto;border-radius:10px}
+  .doc a{border-bottom:1px solid color-mix(in srgb,var(--accent) 35%,transparent)}
+  .doc a:hover{text-decoration:none;border-bottom-color:var(--accent)}
+
+  .pagefoot{max-width:860px;margin:52px auto 0;padding:20px 20px 0;border-top:1px solid var(--line);
+    color:var(--muted);font-size:.88rem}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="wrap">
+    <a class="home" href="index.html"><span class="dot"></span> DICOM De-Identification</a>
+    <nav class="topnav">
+        <a href="roadmap.html">Roadmap</a>
+        <a href="airgap-install.html">Air-gap install</a>
+        <a href="security-model.html">Security model</a>
+        <a href="ps315-mapping.html">PS3.15 mapping</a>
+        <a href="text-detection.html">Text PHI</a>
+        <a href="pixel-redaction.html">Pixel redaction</a>
+        <a href="qa-governance.html">QA & governance</a>
+        <a href="projects-integrity-signing.html">Projects & signing</a>
+        <a href="bulk-engine.html">Bulk engine</a>
+    </nav>
+  </div>
+</div>
+<main>
+  <article class="doc wrap">
+<h1>Projects, integrity &amp; signing (Phase 6.5)</h1>
+<p>A de-identification effort is more than one folder run once. The same rules,
+the same patient-hashing, and the same reviewer sign-off have to follow a study
+across weeks and across <strong>portable disks</strong> — SingHealth cardiovascular batches
+are large enough that the input and output folders move between hard drives
+mid-run. This slice makes that first-class:</p>
+<ol>
+<li><strong>Projects</strong> — a named, portable bundle of settings you can copy to another
+study and rebind to a new disk.</li>
+<li><strong>Dual-scope hashing</strong> — the same NRIC can hash <em>identically everywhere</em>
+(global) or <em>differently per study</em> (project), your choice per project.</li>
+<li><strong>Disk-swap-safe resume</strong> — swap the drive, rebind the folders, keep going.</li>
+<li><strong>Integrity</strong> — before/after checksums and a per-file processing log.</li>
+<li><strong>Signing</strong> — an Ed25519 sidecar signature per output for tamper-evident
+assurance, verifiable by a reviewer who holds only the public key.</li>
+<li><strong>Metadata review</strong> — the reviewer inspects the de-identified header itself,
+not just the residual-scan verdict.</li>
+</ol>
+<h2>1. Project — a portable bundle</h2>
+<p>A <strong>project</strong> lives entirely in the writable workspace, outside git and outside
+the shipped package, so it copies onto a portable disk as a folder:</p>
+<pre><code>$DICOMDEID_WORKSPACE/
+  projects/&lt;project_id&gt;/
+    project.json          # the settings (below)
+    manifest.sqlite       # this project's resumable job queue
+    keystore.json         # only when hashing scope = project
+    processed_log.jsonl   # append-only per-file processing log
+    audit_log.jsonl       # this project's hash-chained audit log
+    signing/pipeline_ed25519.key + .pub   # only when signing scope = project
+  keystores/global.json                   # portable global salt (shared, linkable)
+  signing/global_ed25519.key + .pub       # portable global signing key
+</code></pre>
+<p><code>project.json</code> is the copyable descriptor:</p>
+<pre><code class="language-json">{
+  &quot;project_id&quot;: &quot;nhcs_echo_2026&quot;,
+  &quot;label&quot;: &quot;NHCS Echo 2026&quot;,
+  &quot;profile_id&quot;: &quot;nhcs_echo_2026&quot;,
+  &quot;hashing&quot;:  { &quot;scope&quot;: &quot;global&quot;,  &quot;reversible&quot;: true },
+  &quot;signing&quot;:  { &quot;enabled&quot;: true, &quot;scope&quot;: &quot;global&quot; },
+  &quot;roots&quot;:    { &quot;in&quot;: &quot;E:/incoming&quot;, &quot;out&quot;: &quot;F:/deid&quot; },
+  &quot;created_by&quot;: &quot;yh&quot;, &quot;created_at&quot;: &quot;2026-09-03T...&quot;
+}
+</code></pre>
+<p><strong>Copy settings to a new project.</strong> <code>project_create(new_id, copy_from=old_id)</code>
+clones the source profile (reusing the Phase 4 <code>profile_clone</code>) and copies the
+hashing/signing policy, but starts a <strong>fresh manifest, log, and audit chain</strong>
+and leaves the roots for you to point at the new disk. Two projects that both
+use <code>scope: global</code> stay linkable automatically.</p>
+<h2>2. Dual-scope hashing</h2>
+<p>Pseudonyms are <code>salted_sha256(value, salt)</code>; the salt lives in a keystore file.
+So “global vs project” is simply <em>which keystore a project resolves to</em>:</p>
+<ul>
+<li><strong>global</strong> → <code>keystores/global.json</code> — one portable salt shared by every
+project that opts in. The same NRIC → the same pseudonym across projects,
+machines, and disk swaps. Enables longitudinal / cross-project linkage. This
+file links patients, so it is guarded like the crosswalk.</li>
+<li><strong>project</strong> → <code>projects/&lt;id&gt;/keystore.json</code> — a salt unique to the project.
+The same NRIC → a <em>different</em> pseudonym in another project.</li>
+</ul>
+<p>Persistence is decoupled from reversibility. A new keystore mode makes the salt
+<strong>persist even when irreversible</strong>, so “same NRIC, same hash regardless of when
+we run it” holds in both modes:</p>
+<ul>
+<li><strong>reversible</strong> (default) — persist salt <strong>and</strong> the encrypted orig↔pseudonym
+crosswalk; authorised staff can re-identify (research follow-up/recontact).</li>
+<li><strong>deterministic-irreversible</strong> — persist <strong>only the salt</strong>; <code>record()</code> is a
+no-op, no crosswalk is ever written, re-identification is impossible, but
+hashes stay stable over time.</li>
+</ul>
+<p>Both are per-project selectable. <code>deid_run</code> gains an explicit <code>reversible</code> flag
+and always receives a keystore path (the project resolves it); the old
+“no path ⇒ random ephemeral salt” behaviour is retired because it broke
+cross-run stability.</p>
+<h2>3. Disk-swap-safe resume</h2>
+<p>Today the manifest resumes on the <strong>absolute</strong> <code>input_path</code> with a unique index
+on <code>(batch_id, input_path)</code> — a new drive letter after a disk swap looks like a
+brand-new file, so everything re-processes. Fix:</p>
+<ul>
+<li>Store paths <strong>relative to the project roots</strong>: new <code>rel_in</code> / <code>rel_out</code>
+columns; the unique identity becomes <code>(batch_id, rel_in)</code>.</li>
+<li>Resolve absolute paths against the project’s <strong>current</strong> roots at claim time.</li>
+<li><code>project_rebind_roots(project, new_in, new_out)</code> updates <code>project.json</code>; the
+manifest is untouched because it already stores relative paths. After
+rebinding <code>E:/</code> → <code>G:/</code>, <code>done</code> rows stay done and <code>pending</code> rows resume.</li>
+<li>Back-compatible: rows without <code>rel_in</code> fall back to the stored absolute path.</li>
+</ul>
+<h2>4. Integrity — checksums + processing log</h2>
+<ul>
+<li>Manifest gains <code>input_sha256</code> and <code>output_sha256</code>. The worker streams the
+input to hash it <em>before</em> de-id and hashes the written output <em>after</em>
+(chunked, safe for ~2 TB throughput).</li>
+<li>before ≠ after <strong>by design</strong> — de-id changes bytes. The point is provenance
+and tamper-evidence: the pair is recorded, signed (§5), and chained into the
+audit log.</li>
+<li><code>processed_log.jsonl</code> (append-only) gets one line per file:
+<code>{ts, rel_in, rel_out, input_sha256, output_sha256, modality, transfer_syntax, status, residual_count, signature_id}</code>. This is the
+human-readable “what was processed, and did it change as expected” record.</li>
+</ul>
+<h2>5. Signing — Ed25519 sidecar</h2>
+<p><code>signing.py</code> (built on the existing <code>cryptography</code> dependency):</p>
+<ul>
+<li><code>ensure_keypair(dir)</code> — generate <code>pipeline_ed25519.key</code> (private, PEM) and
+<code>.pub</code> if absent.</li>
+<li><code>sign_output(output_path, meta, key_path)</code> — write <code>&lt;output&gt;.sig.json</code>:
+<code>{v, file, sha256, deid_method, profile_id, project_id, signed_by, signed_at, sig}</code>, where <code>sig</code> is Ed25519 over the canonical JSON of the
+payload. A per-batch <code>batch_manifest.sig.json</code> signs the list of
+<code>(rel, sha256)</code>.</li>
+<li><code>verify_output(output_path, pub_path)</code> — recompute the SHA-256, verify the
+signature → <code>{ok, reason}</code>. A file verifies only when its bytes still match
+the signed hash <strong>and</strong> the signature checks out.</li>
+</ul>
+<p>The <strong>public key ships in the bundle</strong>, so a reviewer on any machine can verify
+without the private key and cannot forge. Signing scope (global/project)
+follows the project setting.</p>
+<h2>6. Reviewer metadata review</h2>
+<p><code>read_metadata(path)</code> returns the de-identified header as searchable rows
+<code>[{tag, keyword, vr, value}]</code>, recursing one level into sequences, masking any
+value the residual scan flagged (reusing <code>_mask_preview</code>). The <strong>QA / Review</strong>
+tab gains a <strong>Metadata</strong> panel: pick a file → inspect its de-identified tags
+alongside the residual verdict and the signature status, so the reviewer
+eyeballs the real header before signing off.</p>
+<h2>7. UI &amp; wiring</h2>
+<ul>
+<li>New <code>mod_projects.R</code> — create / clone / select a project; edit hashing scope,
+reversibility, and signing; set and <strong>rebind</strong> the input/output roots
+(“disk swapped → rebind”). The selected project is the app’s active context.</li>
+<li><code>mod_bulk</code>, <code>mod_interactive</code>, and <code>mod_qa</code> read the <strong>active project’s</strong>
+profile, keystore, roots, and manifest instead of ad-hoc inputs.</li>
+<li>Audit stays <strong>per-project</strong>: each project has its own hash-chained
+<code>audit_log.jsonl</code>, so the audit travels with the bundle. Entries carry the
+<code>project_id</code>.</li>
+</ul>
+<h2>8. Bundle (Phase 7)</h2>
+<p>The portable bundle includes <code>keystores/global.json</code> and
+<code>signing/global_ed25519.*</code> so global hashing and signature verification work on
+the target air-gapped workstation. These files link patients and can sign as
+the pipeline — they are handled as secrets, guarded like the crosswalk, and
+never committed to git.</p>
+<h2>Verification (test-first)</h2>
+<ul>
+<li><strong>Engine (pytest):</strong> salt-only irreversible keystore (stable hash, empty
+crosswalk); global vs project salt → identical / different pseudonym for the
+same NRIC; <code>file_sha256</code>; sign → verify round-trip, tampered bytes → FAIL,
+wrong key → FAIL; <code>read_metadata</code> masks flagged values and recurses a
+sequence.</li>
+<li><strong>R (testthat):</strong> <code>project_create</code> / clone copies settings + starts a fresh
+manifest; <code>project_rebind_roots</code> → resume matches on the relative path after a
+simulated drive change; manifest checksum columns populate; processing-log
+append/read; signature-verify table; per-project audit tagging.</li>
+<li><strong>End-to-end:</strong> de-identify <code>image-00000.dcm</code> under a project, swap the output
+root, resume without re-processing, verify the signature, and view the
+de-identified metadata in the review tab.</li>
+</ul>
+
+  </article>
+  <div class="pagefoot">
+    <a href="index.html">&larr; Back to the run guide</a> &nbsp;·&nbsp;
+    <a href="https://github.com/lauyeehow1986-hub/dicom_deidentification">GitHub repository</a><br>
+    Research / educational de-identification tool — not for diagnosis or clinical decision-making.
+    Documentation reflects synthetic data only.
+  </div>
+</main>
+</body>
+</html>

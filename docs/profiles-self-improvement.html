@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Profiles & self-improvement (Phase 4) — DICOM De-Identification</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --surface:#ffffff; --surface-2:#eef1f5; --ink:#1a2230; --muted:#5a6675;
+    --line:#dce1e8; --accent:#1f6feb; --accent-ink:#ffffff; --ok:#1f8f4e; --ok-bg:#e6f4ea;
+    --warn-bg:#fdebd8; --warn-ink:#8a4b12; --code-bg:#0f1523; --code-ink:#e7ecf3;
+    --shadow:0 1px 2px rgba(16,24,40,.06),0 6px 20px rgba(16,24,40,.06); --radius:14px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0e1116; --surface:#161b22; --surface-2:#1c232d; --ink:#e7ecf3; --muted:#9aa7b6;
+      --line:#2a323d; --accent:#4d9dff; --accent-ink:#08111f; --ok:#5ed08c; --ok-bg:#12321f;
+      --warn-bg:#3a2a16; --warn-ink:#f2c489; --code-bg:#0a0e16; --code-ink:#e7ecf3;
+      --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:860px;margin:0 auto;padding:0 20px}
+
+  .topbar{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--surface) 88%,transparent);
+    backdrop-filter:saturate(1.4) blur(8px);border-bottom:1px solid var(--line)}
+  .topbar .wrap{max-width:1040px;display:flex;align-items:center;justify-content:space-between;
+    height:52px;gap:16px}
+  .topbar a{color:var(--ink)}
+  .home{font-weight:600;display:inline-flex;align-items:center;gap:.45em}
+  .home .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);
+    box-shadow:0 0 0 3px var(--ok-bg);display:inline-block}
+  .topnav{display:flex;gap:18px;font-size:.9rem;flex-wrap:wrap}
+  .topnav a{color:var(--muted)}
+  .topnav a:hover{color:var(--ink)}
+
+  main{padding:36px 0 72px}
+  .doc h1{font-size:clamp(1.7rem,4vw,2.4rem);line-height:1.15;letter-spacing:-.02em;margin:.1em 0 .5em}
+  .doc h2{font-size:1.4rem;letter-spacing:-.01em;margin:1.9em 0 .5em;padding-bottom:.25em;
+    border-bottom:1px solid var(--line)}
+  .doc h3{font-size:1.12rem;margin:1.5em 0 .4em}
+  .doc h4{font-size:1rem;margin:1.3em 0 .3em;color:var(--muted)}
+  .doc p{margin:.7em 0}
+  .doc ul,.doc ol{padding-left:1.4em;margin:.6em 0}
+  .doc li{margin:.3em 0}
+  .doc li>p{margin:.3em 0}
+  .doc code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    font-size:.88em;background:var(--surface-2);border:1px solid var(--line);
+    border-radius:6px;padding:.08em .38em}
+  .doc pre{background:var(--code-bg);color:var(--code-ink);border-radius:12px;padding:16px 18px;
+    overflow-x:auto;font-size:.88rem;line-height:1.55;border:1px solid var(--line)}
+  .doc pre code{background:none;border:0;padding:0;color:inherit;font-size:1em}
+  .doc blockquote{margin:1.1em 0;background:var(--warn-bg);color:var(--warn-ink);
+    border-radius:10px;border:0;padding:12px 18px}
+  .doc blockquote p{margin:.3em 0}
+  .doc blockquote strong{color:var(--warn-ink)}
+  .doc table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.94rem;
+    display:block;overflow-x:auto}
+  .doc th,.doc td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  .doc th{background:var(--surface-2);font-weight:600}
+  .doc tr:nth-child(even) td{background:color-mix(in srgb,var(--surface-2) 45%,transparent)}
+  .doc hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+  .doc img{max-width:100%;height:auto;border-radius:10px}
+  .doc a{border-bottom:1px solid color-mix(in srgb,var(--accent) 35%,transparent)}
+  .doc a:hover{text-decoration:none;border-bottom-color:var(--accent)}
+
+  .pagefoot{max-width:860px;margin:52px auto 0;padding:20px 20px 0;border-top:1px solid var(--line);
+    color:var(--muted);font-size:.88rem}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="wrap">
+    <a class="home" href="index.html"><span class="dot"></span> DICOM De-Identification</a>
+    <nav class="topnav">
+        <a href="roadmap.html">Roadmap</a>
+        <a href="airgap-install.html">Air-gap install</a>
+        <a href="security-model.html">Security model</a>
+        <a href="ps315-mapping.html">PS3.15 mapping</a>
+        <a href="text-detection.html">Text PHI</a>
+        <a href="pixel-redaction.html">Pixel redaction</a>
+        <a href="qa-governance.html">QA & governance</a>
+        <a href="projects-integrity-signing.html">Projects & signing</a>
+        <a href="bulk-engine.html">Bulk engine</a>
+    </nav>
+  </div>
+</div>
+<main>
+  <article class="doc wrap">
+<h1>Profiles &amp; self-improvement (Phase 4)</h1>
+<p>De-identification is never “done once” — every study team hits an identifier the
+pipeline missed. Phase 4 makes the tool <em>learnable</em>: the reviewer keeps
+per-project profiles and feeds misses straight back into detection, without
+touching code or the shipped package.</p>
+<h2>The writable workspace</h2>
+<p>The shipped package (<code>inst/profiles</code>, <code>inst/gazetteers</code>) is read-only on the
+air-gapped box. Everything the reviewer <em>creates</em> lives in a separate <strong>workspace</strong>
+(<code>inst/python/deid_engine/workspace.py</code>):</p>
+<pre><code>$DICOMDEID_WORKSPACE            (default: ./workspace next to the app)
+  profiles/&lt;id&gt;_profile.yml     per-project profiles
+  gazetteers/&lt;id&gt;_custom.txt    names/values grown by tagging misses
+  labeled_examples.jsonl        every captured miss (for a later NER fine-tune)
+  ner_export/train.jsonl        the exported training set
+</code></pre>
+<p>The workspace is <strong>git-ignored</strong> — it can contain identifiers captured from real
+studies, so it must never be committed. The app sets <code>$DICOMDEID_WORKSPACE</code>
+alongside itself at startup; override it to point at a shared project location.</p>
+<h2>Per-project profiles</h2>
+<p>A profile = PS3.15 option toggles + date/reversibility policy + private-tag
+policy + the layered text-detection config. The <strong>Rules &amp; Profiles</strong> tab lets the
+reviewer:</p>
+<ul>
+<li>pick a profile and see every setting;</li>
+<li>edit it and <strong>Save</strong> — a shipped default is <em>copied</em> into the workspace on
+first edit (<code>profile_get</code> resolves a workspace copy ahead of the shipped one),
+so the package stays pristine;</li>
+<li><strong>Save as new project</strong> to clone under a new id (e.g. <code>cardio_ct</code>, <code>echo_us</code>);</li>
+<li><strong>Use for other tabs</strong> to make it the active profile the Interactive / Pixels /
+QA tabs run.</li>
+</ul>
+<p>Engine surface: <code>profiles_list</code>, <code>profile_get</code>, <code>profile_save</code>, <code>profile_clone</code>.</p>
+<h2>Tag-a-miss self-improvement loop</h2>
+<p>The <strong>Tagging</strong> tab captures a value the pipeline missed (in a metadata tag or
+burned into pixels). Every capture:</p>
+<ol>
+<li><strong>always</strong> appends a labeled example to <code>labeled_examples.jsonl</code>; and</li>
+<li>per the chosen fix, either
+<ul>
+<li><strong>adds it to the project gazetteer</strong> (<code>gazetteers/&lt;id&gt;_custom.txt</code>, wired
+into the profile’s <code>text_detection.extra_gazetteer_files</code>), and/or</li>
+<li><strong>appends a custom-regex rule</strong> (<code>text_detection.custom_regex</code>), a compiled
+extra layer in the scanner alongside the SG recognisers.</li>
+</ul>
+</li>
+</ol>
+<p>Because the fix edits the <em>project profile</em>, the next run with that profile
+catches the value. The loop is closed and deterministic: tag <code>Dr Muthusamy</code> once,
+and every later study de-identified under that project scrubs it.</p>
+<p>Engine surface: <code>tag_capture(category, value, profile_id, fix, pattern, …)</code>.</p>
+<h2>NER fine-tuning hook</h2>
+<p><strong>Export NER training set</strong> turns the accumulated labeled examples into a
+training-ready JSON-lines file (<code>{&quot;text&quot;, &quot;entities&quot;: [[start, end, LABEL]]}</code>),
+the shape spaCy / transformers fine-tuning expects. This is a <strong>hook, not a
+trainer</strong> — <code>ner_export_examples</code> prepares the data; an offline <code>spacy train</code> /
+transformers fine-tune runs separately on the air-gapped box, and the app then
+consumes the resulting model directory via <code>text_detection.ner_model</code>.</p>
+<h2>Degradation</h2>
+<p>No new runtime dependency. The custom-regex layer is pure <code>re</code>; a broken pattern
+is skipped with a note rather than failing the scan. A profile with no learned
+rules behaves exactly as the shipped default.</p>
+
+  </article>
+  <div class="pagefoot">
+    <a href="index.html">&larr; Back to the run guide</a> &nbsp;·&nbsp;
+    <a href="https://github.com/lauyeehow1986-hub/dicom_deidentification">GitHub repository</a><br>
+    Research / educational de-identification tool — not for diagnosis or clinical decision-making.
+    Documentation reflects synthetic data only.
+  </div>
+</main>
+</body>
+</html>

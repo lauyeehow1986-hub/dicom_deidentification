@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Air-gapped installation & packaging — DICOM De-Identification</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --surface:#ffffff; --surface-2:#eef1f5; --ink:#1a2230; --muted:#5a6675;
+    --line:#dce1e8; --accent:#1f6feb; --accent-ink:#ffffff; --ok:#1f8f4e; --ok-bg:#e6f4ea;
+    --warn-bg:#fdebd8; --warn-ink:#8a4b12; --code-bg:#0f1523; --code-ink:#e7ecf3;
+    --shadow:0 1px 2px rgba(16,24,40,.06),0 6px 20px rgba(16,24,40,.06); --radius:14px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0e1116; --surface:#161b22; --surface-2:#1c232d; --ink:#e7ecf3; --muted:#9aa7b6;
+      --line:#2a323d; --accent:#4d9dff; --accent-ink:#08111f; --ok:#5ed08c; --ok-bg:#12321f;
+      --warn-bg:#3a2a16; --warn-ink:#f2c489; --code-bg:#0a0e16; --code-ink:#e7ecf3;
+      --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:860px;margin:0 auto;padding:0 20px}
+
+  .topbar{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--surface) 88%,transparent);
+    backdrop-filter:saturate(1.4) blur(8px);border-bottom:1px solid var(--line)}
+  .topbar .wrap{max-width:1040px;display:flex;align-items:center;justify-content:space-between;
+    height:52px;gap:16px}
+  .topbar a{color:var(--ink)}
+  .home{font-weight:600;display:inline-flex;align-items:center;gap:.45em}
+  .home .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);
+    box-shadow:0 0 0 3px var(--ok-bg);display:inline-block}
+  .topnav{display:flex;gap:18px;font-size:.9rem;flex-wrap:wrap}
+  .topnav a{color:var(--muted)}
+  .topnav a:hover{color:var(--ink)}
+
+  main{padding:36px 0 72px}
+  .doc h1{font-size:clamp(1.7rem,4vw,2.4rem);line-height:1.15;letter-spacing:-.02em;margin:.1em 0 .5em}
+  .doc h2{font-size:1.4rem;letter-spacing:-.01em;margin:1.9em 0 .5em;padding-bottom:.25em;
+    border-bottom:1px solid var(--line)}
+  .doc h3{font-size:1.12rem;margin:1.5em 0 .4em}
+  .doc h4{font-size:1rem;margin:1.3em 0 .3em;color:var(--muted)}
+  .doc p{margin:.7em 0}
+  .doc ul,.doc ol{padding-left:1.4em;margin:.6em 0}
+  .doc li{margin:.3em 0}
+  .doc li>p{margin:.3em 0}
+  .doc code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    font-size:.88em;background:var(--surface-2);border:1px solid var(--line);
+    border-radius:6px;padding:.08em .38em}
+  .doc pre{background:var(--code-bg);color:var(--code-ink);border-radius:12px;padding:16px 18px;
+    overflow-x:auto;font-size:.88rem;line-height:1.55;border:1px solid var(--line)}
+  .doc pre code{background:none;border:0;padding:0;color:inherit;font-size:1em}
+  .doc blockquote{margin:1.1em 0;background:var(--warn-bg);color:var(--warn-ink);
+    border-radius:10px;border:0;padding:12px 18px}
+  .doc blockquote p{margin:.3em 0}
+  .doc blockquote strong{color:var(--warn-ink)}
+  .doc table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.94rem;
+    display:block;overflow-x:auto}
+  .doc th,.doc td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  .doc th{background:var(--surface-2);font-weight:600}
+  .doc tr:nth-child(even) td{background:color-mix(in srgb,var(--surface-2) 45%,transparent)}
+  .doc hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+  .doc img{max-width:100%;height:auto;border-radius:10px}
+  .doc a{border-bottom:1px solid color-mix(in srgb,var(--accent) 35%,transparent)}
+  .doc a:hover{text-decoration:none;border-bottom-color:var(--accent)}
+
+  .pagefoot{max-width:860px;margin:52px auto 0;padding:20px 20px 0;border-top:1px solid var(--line);
+    color:var(--muted);font-size:.88rem}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="wrap">
+    <a class="home" href="index.html"><span class="dot"></span> DICOM De-Identification</a>
+    <nav class="topnav">
+        <a href="roadmap.html">Roadmap</a>
+        <a href="airgap-install.html">Air-gap install</a>
+        <a href="security-model.html">Security model</a>
+        <a href="ps315-mapping.html">PS3.15 mapping</a>
+        <a href="text-detection.html">Text PHI</a>
+        <a href="pixel-redaction.html">Pixel redaction</a>
+        <a href="qa-governance.html">QA & governance</a>
+        <a href="projects-integrity-signing.html">Projects & signing</a>
+        <a href="bulk-engine.html">Bulk engine</a>
+    </nav>
+  </div>
+</div>
+<main>
+  <article class="doc wrap">
+<h1>Air-gapped installation &amp; packaging</h1>
+<p>The target is a <strong>locked-down, air-gapped work laptop</strong>: no IT-admin installs, no internet.
+Everything is built on a connected dev machine, then <strong>moved as folders</strong> (no installer).</p>
+<p>The app has <strong>two runtimes</strong>: R/Shiny (UI + orchestration) and a <strong>Python engine</strong> (DICOM/PHI).
+The bundle must carry both.</p>
+<h2>1. The R/Shiny half — <code>shiny_alcatraz</code></h2>
+<p>Use <strong><a href="https://github.com/lauyeehow1986-hub/shiny_alcatraz"><code>shiny_alcatraz</code></a></strong> <code>build_portable()</code>
+to bundle <strong>portable R + all R packages + the app</strong> into a copy-over, double-click, zero-admin
+folder. This is the recommended path and matches the constraint exactly.</p>
+<pre><code class="language-r"># on the connected build machine
+shinyalcatraz::build_portable(app_dir = &quot;.&quot;, out = &quot;dist/dicomdeid-portable&quot;)
+</code></pre>
+<ul>
+<li><strong>Do NOT use <code>build_wasm()</code></strong> — the DICOM decoders and the Python engine cannot run in browser
+WebAssembly.</li>
+<li><code>build_tauri()</code> is an option if you want a single <code>.exe</code> shell instead of a folder.</li>
+</ul>
+<h3>The gap alcatraz does not fill</h3>
+<p><code>shiny_alcatraz</code> is <strong>R-only</strong> — it does not package Python / reticulate. So it bundles the R side;
+the Python engine is carried separately (next section) and wired via an env var.</p>
+<h2>2. The Python engine half — relocatable <code>uv</code> venv</h2>
+<p>Build the relocatable venv on the connected machine and copy it into the bundle:</p>
+<pre><code class="language-powershell">pwsh inst/python/build_venv.ps1 -Phi -Ner     # base + Presidio/OCR + transformer NER
+# produces inst/python/.venv  (relocatable) — now also stages pypdfium2
+# (Apache-2.0/BSD-3, self-contained wheel) for encapsulated-PDF rasterize+redact
+</code></pre>
+<p>Then place, inside the distributed folder:</p>
+<ul>
+<li><code>inst/python/.venv/</code>  — the relocatable venv</li>
+<li><code>inst/models/&lt;name&gt;/</code> — the transformer-NER model <strong>directory</strong> (gitignored; too big for
+git). Point <code>text_detection.ner_model</code> at this path in the profile. The engine loads it
+<strong>local-only</strong> and never reaches the network, so a missing/misconfigured path just
+disables the NER layer (the deterministic layers still run) — see
+<a href="text-detection.html">text-detection.md</a>.</li>
+<li>a <strong>spaCy model</strong> installed into the venv (e.g. <code>en_core_web_lg</code>) so the Presidio layer
+can build; without it, Presidio is skipped and the deterministic layers carry text detection.</li>
+<li>the <strong>Tesseract OCR binary</strong> (needed by <code>presidio-image-redactor</code>, and by the
+<code>encapsulated_pdf.mode: rasterize_redact</code> PDF path) — a portable copy, no admin.
+Without it, <code>rasterize_redact</code> degrades to removing the embedded PDF — see
+<a href="encapsulated-pdf.html">encapsulated-pdf.md</a>.</li>
+</ul>
+<h3>Wiring R -&gt; Python on the target</h3>
+<p><code>engine_bridge.R</code> finds the venv via the <code>DICOMDEID_VENV</code> environment variable (default
+<code>inst/python/.venv</code>). Set it in the launcher so both portable runtimes sit in one folder:</p>
+<pre><code>DICOMDEID_VENV = &lt;bundle&gt;/inst/python/.venv
+</code></pre>
+<h2>3. One-shot portable bundle — <code>tools/build_portable_bundle.ps1</code> (recommended)</h2>
+<p>If you want the target to need <strong>nothing pre-installed</strong> (no R, no admin), one script does
+the whole composition: portable R + the app’s R packages (via <code>shiny_alcatraz</code>), the
+relocatable Python engine venv, the transformer NER model, the portable Tesseract OCR
+runtime, and the Ed25519 signing keys — then wires the launcher and writes the checksum
+manifest. Build it on the connected machine, copy the folder over, double-click <code>run.bat</code>.</p>
+<pre><code class="language-powershell"># prerequisites on the connected machine (once):
+#   pwsh inst/python/build_venv.ps1 -Phi -Ner       # the relocatable engine venv
+#   inst/models/&lt;ner-model&gt;/                          # a local token-classification model dir
+#   vendor/tesseract/tesseract.exe                    # a portable Tesseract (UB-Mannheim, extracted)
+tools\build_portable_bundle.ps1 -Out dist\dicomdeid-portable
+# reproducible pin (locks R + CRAN package versions):
+tools\build_portable_bundle.ps1 -RVersion 4.5.1 -Snapshot 2026-09-01
+# omit the signing keys:
+tools\build_portable_bundle.ps1 -SkipSecrets
+</code></pre>
+<p>It stages a <strong>clean</strong> app tree (never <code>.git</code>, <code>tests/</code>, runtime state, or any stray real
+<code>.dcm</code>), runs <code>build_portable()</code>, copies the venv/model/Tesseract/keys under <code>&lt;Out&gt;/app</code>,
+strips the build-machine editable-install pointer so the venv is fully relocatable, and
+patches <code>run_app.R</code> so the engine finds everything by env var on the target
+(<code>DICOMDEID_VENV</code>, <code>PYTHONPATH</code>, <code>DICOMDEID_WORKSPACE</code>, <code>DICOMDEID_TESSERACT</code>,
+<code>TESSDATA_PREFIX</code>, offline HF). There is <strong>no pre-made global keystore</strong> — set its
+passphrase on the target on first run (§3.1). Sections 1–2 and 3.2 below are the pieces this
+script automates; run them by hand only if you need a non-portable bundle.</p>
+<h3>3.1 The global keystore passphrase (set on the target)</h3>
+<p>The bundle ships the <strong>signing keys</strong> but not a global keystore. On the target, the first
+reversible global-scope run asks you for a passphrase; that creates
+<code>workspace/keystores/global.json</code> (a fresh salt + the encrypted crosswalk). To keep
+pseudonyms linking <strong>across machines</strong>, copy that <code>global.json</code> to the other boxes and reuse
+the same passphrase — the passphrase never travels inside the bundle.</p>
+<h3>3.2 Manual assembly (non-portable) — <code>tools/build_bundle.ps1</code></h3>
+<p>If the target already has R and the app’s packages, stage the app + venv only (smaller) and
+<strong>checksum every file</strong> into <code>BUNDLE_MANIFEST.json</code>:</p>
+<pre><code class="language-powershell">pwsh tools/build_bundle.ps1 -Out dist/dicomdeid-portable
+# add the NER model + secrets:
+pwsh tools/build_bundle.ps1 -Out dist/dicomdeid-portable -Models inst/models -Secrets
+</code></pre>
+<p>It stages the R app, <code>inst/python</code> (the relocatable venv, caches pruned), profiles, gazetteers,
+the corpus generator, and — with <code>-Models</code>/<code>-Dcmtk</code> — the optional model/binaries, then writes a
+launcher (<code>run_app.ps1</code>, which sets <code>DICOMDEID_VENV</code>) and the manifest. It prints the component
+checklist (<code>bundle_components()</code>); required parts missing from the staged tree are called out.</p>
+<h3>Secrets in the bundle (<code>-Secrets</code>)</h3>
+<p>The <strong>global keystore</strong> (<code>workspace/keystores/global.json</code>) and the <strong>Ed25519 signing keys</strong>
+(<code>workspace/signing/</code>) are what make pseudonyms link across projects/machines and let a
+reviewer trust a de-identified study’s signature. (<code>build_bundle.ps1</code> reads them from the
+workspace — override with <code>-Workspace &lt;path&gt;</code> — and stages them into the bundle’s <code>workspace/</code>.) They are <strong>secrets</strong> — they can re-link patients
+and sign as the pipeline — so they are <strong>git-ignored and never committed</strong>. <code>-Secrets</code> copies them
+into the bundle; without it the bundle ships with neither (a new machine then starts its own global
+salt/keys, breaking cross-machine linkage). Move a <code>-Secrets</code> bundle only over a trusted channel,
+and keep the private signing key off any shared drive. The signing <strong>public</strong> key can travel
+freely so anyone can verify outputs.</p>
+<h2>4. Verify + validate on the target (offline)</h2>
+<p>The target is Command Prompt / double-click only — <strong>nothing here needs PowerShell.</strong>
+<code>run.bat</code> launches, <code>verify.bat</code> checks integrity, and the acceptance self-test is the
+app’s <strong>Validation</strong> tab (pure R). All three use the bundle’s own portable R.</p>
+<p><strong>Bundle integrity</strong> — confirm the copy is complete and untampered. On the <strong>target</strong>,
+double-click <strong><code>verify.bat</code></strong> (it re-checksums every file against the manifest with the
+bundle’s portable R and prints <code>RESULT: OK</code>). On a <strong>connected</strong> machine you can instead run:</p>
+<pre><code class="language-powershell">pwsh tools/build_bundle.ps1 -Out dist/dicomdeid-portable -Verify   # re-checksums vs the manifest
+</code></pre>
+<p><strong>Engine + app</strong> — the badge should read “engine: ready”:</p>
+<pre><code class="language-r">shiny::runApp(&quot;.&quot;)
+</code></pre>
+<pre><code class="language-powershell">$env:DICOMDEID_VENV='inst/python/.venv'
+python -c &quot;import deid_engine, json; print(json.dumps(deid_engine.engine_info()))&quot;
+</code></pre>
+<p><strong>Acceptance self-test</strong> — proves the whole pipeline on synthetic <em>planted-PHI</em> data with no real
+studies: it builds the corpus, de-identifies it, and checks that <strong>nothing planted survives</strong>
+(metadata + pixels), outputs stay valid DICOM/NIfTI, the reversibility policy holds, and a rerun
+reprocesses nothing. Run it from the <strong>Validation</strong> tab in the app, or headless:</p>
+<pre><code class="language-r">res &lt;- acceptance_run(mode = &quot;reversible&quot;);  cat(res$markdown)   # then mode = &quot;irreversible&quot;
+</code></pre>
+<p>Both the Validation tab and <code>bundle_verify()</code> are pure R, so they work on the locked-down box
+without the shell. The synthetic corpus itself is regenerated by
+<code>inst/testdata/generate_synthetic.py</code> (a thin CLI over <code>deid_engine.corpus.build_corpus</code>).</p>
+<h2>Notes</h2>
+<ul>
+<li>This dev machine has intermittent HTTPS/cert interception; <code>uv</code> calls use <code>--system-certs</code>.</li>
+<li>No network is used at de-identification time; all models/binaries are local.</li>
+<li><strong>Never</strong> place real patient data inside the bundle or the repo; the corpus is 100% synthetic.</li>
+</ul>
+
+  </article>
+  <div class="pagefoot">
+    <a href="index.html">&larr; Back to the run guide</a> &nbsp;·&nbsp;
+    <a href="https://github.com/lauyeehow1986-hub/dicom_deidentification">GitHub repository</a><br>
+    Research / educational de-identification tool — not for diagnosis or clinical decision-making.
+    Documentation reflects synthetic data only.
+  </div>
+</main>
+</body>
+</html>

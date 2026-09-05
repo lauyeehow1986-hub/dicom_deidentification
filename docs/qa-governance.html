@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QA & governance (Phase 6) — DICOM De-Identification</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --surface:#ffffff; --surface-2:#eef1f5; --ink:#1a2230; --muted:#5a6675;
+    --line:#dce1e8; --accent:#1f6feb; --accent-ink:#ffffff; --ok:#1f8f4e; --ok-bg:#e6f4ea;
+    --warn-bg:#fdebd8; --warn-ink:#8a4b12; --code-bg:#0f1523; --code-ink:#e7ecf3;
+    --shadow:0 1px 2px rgba(16,24,40,.06),0 6px 20px rgba(16,24,40,.06); --radius:14px;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0e1116; --surface:#161b22; --surface-2:#1c232d; --ink:#e7ecf3; --muted:#9aa7b6;
+      --line:#2a323d; --accent:#4d9dff; --accent-ink:#08111f; --ok:#5ed08c; --ok-bg:#12321f;
+      --warn-bg:#3a2a16; --warn-ink:#f2c489; --code-bg:#0a0e16; --code-ink:#e7ecf3;
+      --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.35);
+    }
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font:16px/1.7 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    -webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:860px;margin:0 auto;padding:0 20px}
+
+  .topbar{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--surface) 88%,transparent);
+    backdrop-filter:saturate(1.4) blur(8px);border-bottom:1px solid var(--line)}
+  .topbar .wrap{max-width:1040px;display:flex;align-items:center;justify-content:space-between;
+    height:52px;gap:16px}
+  .topbar a{color:var(--ink)}
+  .home{font-weight:600;display:inline-flex;align-items:center;gap:.45em}
+  .home .dot{width:8px;height:8px;border-radius:50%;background:var(--ok);
+    box-shadow:0 0 0 3px var(--ok-bg);display:inline-block}
+  .topnav{display:flex;gap:18px;font-size:.9rem;flex-wrap:wrap}
+  .topnav a{color:var(--muted)}
+  .topnav a:hover{color:var(--ink)}
+
+  main{padding:36px 0 72px}
+  .doc h1{font-size:clamp(1.7rem,4vw,2.4rem);line-height:1.15;letter-spacing:-.02em;margin:.1em 0 .5em}
+  .doc h2{font-size:1.4rem;letter-spacing:-.01em;margin:1.9em 0 .5em;padding-bottom:.25em;
+    border-bottom:1px solid var(--line)}
+  .doc h3{font-size:1.12rem;margin:1.5em 0 .4em}
+  .doc h4{font-size:1rem;margin:1.3em 0 .3em;color:var(--muted)}
+  .doc p{margin:.7em 0}
+  .doc ul,.doc ol{padding-left:1.4em;margin:.6em 0}
+  .doc li{margin:.3em 0}
+  .doc li>p{margin:.3em 0}
+  .doc code{font-family:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+    font-size:.88em;background:var(--surface-2);border:1px solid var(--line);
+    border-radius:6px;padding:.08em .38em}
+  .doc pre{background:var(--code-bg);color:var(--code-ink);border-radius:12px;padding:16px 18px;
+    overflow-x:auto;font-size:.88rem;line-height:1.55;border:1px solid var(--line)}
+  .doc pre code{background:none;border:0;padding:0;color:inherit;font-size:1em}
+  .doc blockquote{margin:1.1em 0;background:var(--warn-bg);color:var(--warn-ink);
+    border-radius:10px;border:0;padding:12px 18px}
+  .doc blockquote p{margin:.3em 0}
+  .doc blockquote strong{color:var(--warn-ink)}
+  .doc table{border-collapse:collapse;width:100%;margin:1.2em 0;font-size:.94rem;
+    display:block;overflow-x:auto}
+  .doc th,.doc td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+  .doc th{background:var(--surface-2);font-weight:600}
+  .doc tr:nth-child(even) td{background:color-mix(in srgb,var(--surface-2) 45%,transparent)}
+  .doc hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+  .doc img{max-width:100%;height:auto;border-radius:10px}
+  .doc a{border-bottom:1px solid color-mix(in srgb,var(--accent) 35%,transparent)}
+  .doc a:hover{text-decoration:none;border-bottom-color:var(--accent)}
+
+  .pagefoot{max-width:860px;margin:52px auto 0;padding:20px 20px 0;border-top:1px solid var(--line);
+    color:var(--muted);font-size:.88rem}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="wrap">
+    <a class="home" href="index.html"><span class="dot"></span> DICOM De-Identification</a>
+    <nav class="topnav">
+        <a href="roadmap.html">Roadmap</a>
+        <a href="airgap-install.html">Air-gap install</a>
+        <a href="security-model.html">Security model</a>
+        <a href="ps315-mapping.html">PS3.15 mapping</a>
+        <a href="text-detection.html">Text PHI</a>
+        <a href="pixel-redaction.html">Pixel redaction</a>
+        <a href="qa-governance.html">QA & governance</a>
+        <a href="projects-integrity-signing.html">Projects & signing</a>
+        <a href="bulk-engine.html">Bulk engine</a>
+    </nav>
+  </div>
+</div>
+<main>
+  <article class="doc wrap">
+<h1>QA &amp; governance (Phase 6)</h1>
+<p>De-identification is not trustworthy until someone can <em>check</em> it and <em>sign for</em>
+it. Phase 6 adds three things: an automated residual-PHI scan on the outputs, a
+two-role sign-off gate, and a tamper-evident audit log.</p>
+<h2>Residual-PHI scan</h2>
+<p><code>scan_residual</code> (engine, <code>deid_engine.core</code>) re-runs the detectors on an
+already-de-identified file and reports what survived. It is deliberately
+<strong>independent</strong> of the de-id run:</p>
+<ul>
+<li>It builds the layered text scanner from the profile’s <code>text_detection</code> block
+but with an <strong>empty header-token layer</strong>, so the pseudonyms already written
+into the output header (<code>ANON^…</code>, the salted <code>PatientID</code>) are <em>not</em> themselves
+counted as PHI.</li>
+<li>The gazetteer + SG recognisers (NRIC/FIN, phone, email) + optional
+Presidio/NER layers then catch any <em>real</em> identifier that survived, in every
+text VR (recursing into sequences / SR <code>ContentSequence</code>) and, when Tesseract
+is present, in the pixels via OCR.</li>
+<li>The de-identification provenance fields the pipeline writes itself
+(<code>PatientIdentityRemoved</code>, <code>DeidentificationMethod</code>, …) are skipped — otherwise
+Presidio mistakes the method string for a person name.</li>
+</ul>
+<p>Each finding is returned with a <strong>masked preview</strong> (<code>S•••••••D</code>), so the QA
+report can locate a leak without re-disclosing the identifier in clear text. A
+file <code>passed</code> when nothing scored at or above <code>min_score</code> (default 0.5).
+<code>scan_residual_dir</code> aggregates a whole output tree into a batch verdict.</p>
+<p>The R side (<code>R/qa.R</code>) turns per-file reports into the dashboard tables
+(<code>qa_files_df</code>, <code>qa_findings_df</code>) and a batch rollup (<code>residual_scan_paths</code>,
+with an injectable <code>scan_fn</code> so the aggregation is unit-tested without a venv).
+A scan can also annotate the Phase 5 manifest: <code>set_residual</code> moves any output
+row with residual PHI to the <code>flagged</code> status the manifest already reserved.</p>
+<h2>Two-role sign-off gate</h2>
+<p>Two roles (<code>auth.R</code>): <strong>de-identifier</strong> and <strong>reviewer</strong>. The rule is
+segregation of duties — <em>the person who de-identified a batch can never approve
+it</em>. <code>can_sign_off(deidentifier, reviewer, reviewer_role)</code> enforces it: the
+signer must hold the reviewer role, must be named, and must not be the batch’s
+de-identifier (read from the manifest’s <code>created_by</code>). <code>record_signoff</code> runs the
+gate and, only on success, writes the sign-off to the audit log — a refused
+sign-off writes nothing.</p>
+<p>A light salted-hash credential store (<code>make_user</code> / <code>verify_user</code>) separates the
+two roles without a network dependency; <code>shinymanager</code> is not available on the
+air-gapped box. Harden with an OS/AD login at deployment if required.</p>
+<h2>Audit log (append-only, hash-chained)</h2>
+<p>Every de-identification run, residual scan, and sign-off is appended as one JSON
+line under <code>workspace/audit/audit_log.jsonl</code> (<code>audit.R</code>). Each entry carries the
+previous entry’s hash, and its own SHA-256 covers that link, so any edit,
+reorder, or deletion of an earlier line breaks the chain. <code>audit_verify</code> walks
+the chain and reports the first broken entry. Tamper-<strong>evident</strong>, not
+tamper-proof: the point is that quiet edits cannot pass unnoticed during
+governance review. The Audit tab shows the log, verifies integrity, and exports
+CSV.</p>
+<h2>The app</h2>
+<p>The <strong>QA / Review</strong> tab (<code>R/mod_qa.R</code>) scans an output folder or a registered
+batch in a background <code>callr</code> process (Shiny never blocks), shows a PASS/FLAG
+verdict with per-category counts, a per-file table, and a masked findings table,
+then offers the gated reviewer sign-off. The navbar “acting as” control sets the
+current role and the audit actor. The <strong>Audit</strong> tab (<code>R/mod_audit.R</code>) is the
+governance viewer.</p>
+<h2>Verification</h2>
+<ul>
+<li>Engine (<code>tests/python/test_residual.py</code>): clean output passes; leaked
+NRIC/phone/name in text or nested sequences is flagged; pseudonymised headers
+and our own provenance fields are not flagged; previews are masked; the pixel
+scan degrades without Tesseract.</li>
+<li>R (<code>tests/testthat/test-qa.R</code>): the hash chain (append/read/verify + tamper
+detection), the sign-off gate (self-approval and non-reviewer refused, a
+distinct reviewer audited), the credential store, residual aggregation, masked
+findings, and manifest flagging.</li>
+<li>End-to-end on the open-source <code>image-00000.dcm</code>: its de-identified output
+scans <strong>PASS</strong>; a copy with an injected NRIC + phone scans <strong>FLAG</strong> (2
+findings, masked); driven both from a script and live through the QA tab, with
+the run recorded in the hash-chained audit log.</li>
+</ul>
+
+  </article>
+  <div class="pagefoot">
+    <a href="index.html">&larr; Back to the run guide</a> &nbsp;·&nbsp;
+    <a href="https://github.com/lauyeehow1986-hub/dicom_deidentification">GitHub repository</a><br>
+    Research / educational de-identification tool — not for diagnosis or clinical decision-making.
+    Documentation reflects synthetic data only.
+  </div>
+</main>
+</body>
+</html>
