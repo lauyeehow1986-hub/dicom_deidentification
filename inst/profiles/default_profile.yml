@@ -93,3 +93,13 @@ text_detection:
   use_presidio: true               # general PII; needs a spaCy model bundled on the box
   use_ner: true                    # multilingual XLM-R person/location
   ner_model: "models/xlm-roberta-base-ner-hrl"  # local NER model DIR (CPU), relative to inst/; empty -> layer off
+  # Deterministic project rules. Each is {category, pattern, score}; matches are
+  # a high-precision `custom_regex` layer that both scrubs the value during de-id
+  # (fields with action C) and fails the residual QA scan (a "confident" hit).
+  # SG case/accession numbers are frequently NNN-NN-NNNN (SSN-shaped); the ML
+  # layers here only guess NAMES and never fire on a bare number, so without this
+  # rule such an identifier can survive de-id AND pass QA silently.
+  custom_regex:
+    - category: "case_number"
+      pattern: "\\b\\d{3}-\\d{2}-\\d{4}\\b"   # 3-2-4 dashed grouping (case/accession/SSN shape)
+      score: 0.95

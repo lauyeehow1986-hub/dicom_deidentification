@@ -140,16 +140,23 @@ engine_ner_export <- function(out_path = NULL) {
 
 #' Phase 6 QA: re-run the detectors on an OUTPUT and report residual PHI.
 #' Returns the per-file residual report (masked previews, per-category counts,
-#' pass/fail verdict) as an R list.
+#' pass/fail verdict) as an R list. Deterministic hits fail the verdict at
+#' `min_score`; the probabilistic Presidio/NER layers must clear the higher
+#' `ner_min_score` before they count, so their false positives are listed for
+#' review without failing every study.
 engine_scan_residual <- function(path, profile_id = "default",
-                                 scan_pixels = TRUE, min_score = 0.5) {
-  call_engine("scan_residual", path, profile_id, scan_pixels, min_score)
+                                 scan_pixels = TRUE, min_score = 0.5,
+                                 ner_min_score = 0.90) {
+  call_engine("scan_residual", path, profile_id, scan_pixels, min_score,
+              ner_min_score)
 }
 
 #' Phase 6 QA: residual scan over an OUTPUT folder (or single file), aggregated.
 engine_scan_residual_dir <- function(output_path, profile_id = "default",
-                                     scan_pixels = TRUE, min_score = 0.5) {
-  call_engine("scan_residual_dir", output_path, profile_id, scan_pixels, min_score)
+                                     scan_pixels = TRUE, min_score = 0.5,
+                                     ner_min_score = 0.90) {
+  call_engine("scan_residual_dir", output_path, profile_id, scan_pixels,
+              min_score, ner_min_score)
 }
 
 #' Phase 7: build the synthetic planted-PHI acceptance corpus under `out_dir`.

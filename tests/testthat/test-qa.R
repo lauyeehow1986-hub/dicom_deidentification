@@ -123,6 +123,37 @@ test_that("residual_scan_paths aggregates per-file verdicts and categories", {
   expect_true(all(c("File", "Findings", "Verdict") %in% names(fdf)))
 })
 
+fake_scan_mixed <- function(path) {
+  # A file whose only survivors are low-confidence ML guesses: total > 0 but
+  # nothing confident, so the engine verdict PASSES. The QA tables must reflect
+  # both the total (for review) and the confirmed count (what fails a study).
+  list(path = path, passed = TRUE,
+       findings = list(
+         list(location = "metadata", tag = 0L, keyword = "SeriesDescription",
+              category = "name", source = "ner", score = 0.6,
+              preview = "K••••••)", confident = FALSE),
+         list(location = "metadata", tag = 0L, keyword = "ProtocolName",
+              category = "name", source = "presidio", score = 0.7,
+              preview = "H•", confident = FALSE)),
+       by_category = list(name = 2L),
+       counts = list(total = 2L, metadata = 2L, pixels = 0L, confident = 0L),
+       identity_removed = TRUE, notes = list())
+}
+
+test_that("QA tables separate confirmed hits from low-confidence review items", {
+  res <- residual_scan_paths(c("/out/noise.dcm"), scan_fn = fake_scan_mixed)
+  expect_true(res$passed)                    # no confident hit -> batch passes
+  expect_identical(res$total_findings, 2L)   # but the noise is still counted
+  expect_identical(res$total_confident, 0L)
+  fdf <- res$files_df
+  expect_true("Confirmed" %in% names(fdf))
+  expect_identical(fdf$Confirmed[[1]], 0L)
+  expect_identical(fdf$Verdict[[1]], "PASS")
+  fd <- qa_findings_df(res$results)
+  expect_true("Confidence" %in% names(fd))
+  expect_true(all(fd$Confidence == "review"))
+})
+
 test_that("qa_findings_df masks previews and never carries a raw identifier", {
   res <- residual_scan_paths(c("/out/leak_b.dcm"), scan_fn = fake_scan)
   fd <- qa_findings_df(res$results)

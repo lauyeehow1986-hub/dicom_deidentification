@@ -96,6 +96,91 @@ def test_identity_not_removed_is_reported(tmp_path):
     assert res["identity_removed"] is False
 
 
+def test_confident_flag_separates_deterministic_from_probabilistic():
+    # A deterministic layer (SG/gazetteer/header/regex) is trusted at min_score;
+    # a probabilistic layer (presidio/ner) must clear the higher ner_min_score
+    # bar before it counts toward the fail verdict. Every finding stays listed.
+    det = {"source": "sg", "score": 0.6}
+    ner_low = {"source": "ner", "score": 0.6}
+    ner_high = {"source": "ner", "score": 0.9}
+    presidio_low = {"source": "presidio", "score": 0.7}
+    assert core._finding_confident(det, 0.5, 0.85) is True
+    assert core._finding_confident(ner_low, 0.5, 0.85) is False
+    assert core._finding_confident(ner_high, 0.5, 0.85) is True
+    assert core._finding_confident(presidio_low, 0.5, 0.85) is False
+
+
+def test_default_ner_bar_rejects_observed_descriptor_noise():
+    # Real studies showed Presidio emitting a flat 0.85 for PERSON and NER
+    # ~0.86-0.87 on technical descriptors (RescaleType='HU', 'Knee (R)'), while
+    # genuine names score >=0.95. The DEFAULT ner_min_score must sit above the
+    # observed noise so those descriptors do not fail every study, yet admit a
+    # real high-confidence name. This pins that default.
+    import inspect
+    default = inspect.signature(core.scan_residual).parameters["ner_min_score"].default
+    assert default >= 0.90
+    presidio_noise = {"source": "presidio", "category": "name", "score": 0.85}
+    ner_noise = {"source": "ner", "category": "name", "score": 0.87}
+    real_name = {"source": "ner", "category": "name", "score": 0.95}
+    assert core._finding_confident(presidio_noise, 0.5, default) is False
+    assert core._finding_confident(ner_noise, 0.5, default) is False
+    assert core._finding_confident(real_name, 0.5, default) is True
+
+
+def test_probabilistic_noise_does_not_fail_verdict(tmp_path):
+    # A file whose ONLY residual hits come from the ML layers below the
+    # ner_min_score bar must PASS (they are still listed for review, not hidden).
+    findings = [
+        {"source": "ner", "category": "name", "score": 0.55, "location": "metadata"},
+        {"source": "presidio", "category": "name", "score": 0.60, "location": "metadata"},
+    ]
+    passed, n_conf = core._residual_verdict(findings, min_score=0.5, ner_min_score=0.85)
+    assert passed is True
+    assert n_conf == 0
+    # But a real deterministic hit in the same set flips it.
+    findings.append({"source": "sg", "category": "nric_fin", "score": 1.0,
+                     "location": "metadata"})
+    passed, n_conf = core._residual_verdict(findings, min_score=0.5, ner_min_score=0.85)
+    assert passed is False
+    assert n_conf == 1
+
+
+def test_scan_result_tags_confident_and_counts(tmp_path):
+    # scan_residual must stamp each finding with a `confident` flag and expose a
+    # confident count, so the reviewer sees "confirmed vs low-confidence".
+    p = _write(tmp_path / "conf.dcm",
+               derivation="NRIC S1234567D on file")
+    res = core.scan_residual(p)
+    assert all("confident" in f for f in res["findings"])
+    assert res["counts"].get("confident", 0) >= 1
+    assert res["passed"] is False
+
+
+def test_case_number_format_is_caught_as_confident(tmp_path):
+    # A surviving NNN-NN-NNNN case/accession number (SSN-shaped) must be caught
+    # deterministically by the default profile's custom_regex, as a CONFIDENT
+    # `case_number` hit -- not left to the (now demoted) ML PERSON layer, which
+    # in this engine only guesses names and never fires on a bare number.
+    p = _write(tmp_path / "case.dcm",
+               derivation="Ref 324-58-2995/4 pending review")
+    res = core.scan_residual(p)
+    assert res["passed"] is False
+    assert res["by_category"].get("case_number", 0) >= 1
+    hit = next(f for f in res["findings"] if f["category"] == "case_number")
+    assert hit["source"] == "custom_regex"
+    assert hit["confident"] is True
+    assert "324-58-2995" not in hit["preview"]   # still masked in the report
+
+
+def test_case_number_regex_does_not_match_plain_digit_runs(tmp_path):
+    # The rule is specific to the 3-2-4 dashed grouping; a longer plain number
+    # (e.g. a device serial) must NOT trip it.
+    p = _write(tmp_path / "serial.dcm",
+               derivation="Device serial 1234567890 calibrated")
+    res = core.scan_residual(p)
+    assert res["by_category"].get("case_number", 0) == 0
+
+
 def test_pixel_scan_degrades_without_ocr(tmp_path):
     # Add pixels; with no Tesseract the pixel scan must not crash and should note.
     ds = pydicom.dcmread(_write(tmp_path / "px.dcm", derivation="clean"))

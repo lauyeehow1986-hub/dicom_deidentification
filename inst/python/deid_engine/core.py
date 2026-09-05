@@ -1110,6 +1110,39 @@ def _mask_preview(text: str) -> str:
     return s[0] + ("•" * (len(s) - 2)) + s[-1]
 
 
+# Layers precise enough to fail the residual verdict on their own. The header
+# scrub, gazetteer, SG recognisers and profile regexes match concrete known
+# values or checksummed formats; the probabilistic layers (Presidio / NER) guess
+# from context and over-fire on short technical strings ("HU", "Knee (R)"), so
+# they need a higher score before they count against a study.
+_CONFIDENT_SOURCES = frozenset({"header", "gazetteer", "sg", "custom_regex"})
+
+
+def _finding_confident(f: dict, min_score: float, ner_min_score: float) -> bool:
+    """True when a finding should count toward the fail verdict: a deterministic
+    layer at >= ``min_score``, or a probabilistic layer at >= ``ner_min_score``.
+
+    Probabilistic hits below the higher bar are still listed for the reviewer;
+    they just do not fail the study by themselves, which stops ML false positives
+    from burying the real deterministic hits."""
+    src = f.get("source", "")
+    threshold = min_score if src in _CONFIDENT_SOURCES else ner_min_score
+    return float(f.get("score", 0.0)) >= threshold
+
+
+def _residual_verdict(findings: list, min_score: float,
+                      ner_min_score: float) -> tuple:
+    """Stamp each finding with a ``confident`` flag and return
+    ``(passed, n_confident)``. ``passed`` is true when nothing confident survived."""
+    n_conf = 0
+    for f in findings:
+        conf = _finding_confident(f, min_score, ner_min_score)
+        f["confident"] = conf
+        if conf:
+            n_conf += 1
+    return (n_conf == 0), n_conf
+
+
 # De-identification provenance fields the pipeline writes itself. Their values
 # are ours, not patient PHI, so the residual scan skips them (Presidio otherwise
 # mistakes the method string "dicomdeid: ..." for a person name).
@@ -1141,7 +1174,8 @@ def _iter_text_elements(ds, _tag=None):
                 yield tagi, kw, s
 
 
-def _scan_residual_nifti(path: str, scanner, scan_pixels: bool, min_score: float) -> dict:
+def _scan_residual_nifti(path: str, scanner, scan_pixels: bool, min_score: float,
+                         ner_min_score: float = 0.90) -> dict:
     """Residual-PHI scan for a NIfTI output: the header text fields (metadata) and,
     when OCR is available, the burned-in text on each slice (pixels). Returns the
     same result shape as ``scan_residual`` so the batch aggregator treats DICOM and
@@ -1194,12 +1228,13 @@ def _scan_residual_nifti(path: str, scanner, scan_pixels: bool, min_score: float
     by_category: dict[str, int] = {}
     for f in findings:
         by_category[f["category"]] = by_category.get(f["category"], 0) + 1
-    passed = not any(f["score"] >= min_score for f in findings)
+    passed, n_conf = _residual_verdict(findings, min_score, ner_min_score)
     return {
         "path": path,
         "findings": findings,
         "by_category": by_category,
-        "counts": {"total": len(findings), "metadata": n_meta, "pixels": n_pixels},
+        "counts": {"total": len(findings), "metadata": n_meta,
+                   "pixels": n_pixels, "confident": n_conf},
         "passed": passed,
         # NIfTI has no PatientIdentityRemoved tag, and this scan runs independently
         # of the de-id step, so it cannot attest that identity was removed. Report
@@ -1210,7 +1245,8 @@ def _scan_residual_nifti(path: str, scanner, scan_pixels: bool, min_score: float
 
 
 def scan_residual(path: str, profile_id: str = "default",
-                  scan_pixels: bool = True, min_score: float = 0.5) -> dict:
+                  scan_pixels: bool = True, min_score: float = 0.5,
+                  ner_min_score: float = 0.90) -> dict:
     """Phase 6. Re-run the detectors on an OUTPUT file and report residual PHI.
 
     Independent of the de-id run: it builds the layered scanner from the
@@ -1219,13 +1255,17 @@ def scan_residual(path: str, profile_id: str = "default",
     counted as PHI. The gazetteer + SG recognisers (+ optional Presidio/NER)
     then catch any real identifier that survived in metadata or pixels.
 
-    Returns per-category counts, a masked findings list, and a pass/fail verdict
-    (``passed`` is true when nothing scored at or above ``min_score``).
+    Returns per-category counts, a masked findings list, and a pass/fail verdict.
+    ``passed`` is true when nothing *confident* survived: a deterministic-layer
+    hit at >= ``min_score``, or a probabilistic-layer (Presidio/NER) hit at
+    >= ``ner_min_score``. Lower-scoring ML hits are still listed for review but do
+    not fail the study, so their false positives cannot bury real findings.
     """
     td = profile_get(profile_id).get("text_detection") or {}
     scanner = _build_scanner(td, [])   # no header-token seeding on outputs
     if _is_nifti(path):
-        return _scan_residual_nifti(path, scanner, scan_pixels, min_score)
+        return _scan_residual_nifti(path, scanner, scan_pixels, min_score,
+                                    ner_min_score)
 
     import pydicom
     ds = pydicom.dcmread(path)
@@ -1267,14 +1307,15 @@ def scan_residual(path: str, profile_id: str = "default",
     for f in findings:
         by_category[f["category"]] = by_category.get(f["category"], 0) + 1
 
-    passed = not any(f["score"] >= min_score for f in findings)
+    passed, n_conf = _residual_verdict(findings, min_score, ner_min_score)
     identity_removed = str(getattr(ds, "PatientIdentityRemoved", "")) == "YES"
 
     return {
         "path": path,
         "findings": findings,
         "by_category": by_category,
-        "counts": {"total": len(findings), "metadata": n_meta, "pixels": n_pixels},
+        "counts": {"total": len(findings), "metadata": n_meta,
+                   "pixels": n_pixels, "confident": n_conf},
         "passed": passed,
         "identity_removed": identity_removed,
         "notes": notes,
@@ -1282,7 +1323,8 @@ def scan_residual(path: str, profile_id: str = "default",
 
 
 def scan_residual_dir(output_path: str, profile_id: str = "default",
-                      scan_pixels: bool = True, min_score: float = 0.5) -> dict:
+                      scan_pixels: bool = True, min_score: float = 0.5,
+                      ner_min_score: float = 0.90) -> dict:
     """Residual scan over every file under an output folder (or a single file).
 
     Aggregates per-file results into a batch verdict. Unreadable files are
@@ -1291,9 +1333,11 @@ def scan_residual_dir(output_path: str, profile_id: str = "default",
     per_file = []
     total_by_cat: dict[str, int] = {}
     n_pass = n_fail = 0
+    n_findings = n_confident = 0
     for full, rel in _iter_input_files(output_path):
         try:
-            r = scan_residual(full, profile_id, scan_pixels, min_score)
+            r = scan_residual(full, profile_id, scan_pixels, min_score,
+                              ner_min_score)
         except Exception as e:  # noqa: BLE001
             per_file.append({"path": full, "rel": rel, "skipped": str(e)})
             continue
@@ -1301,6 +1345,8 @@ def scan_residual_dir(output_path: str, profile_id: str = "default",
         per_file.append(r)
         for c, n in r["by_category"].items():
             total_by_cat[c] = total_by_cat.get(c, 0) + n
+        n_findings += r["counts"].get("total", 0)
+        n_confident += r["counts"].get("confident", 0)
         if r["passed"]:
             n_pass += 1
         else:
@@ -1309,7 +1355,10 @@ def scan_residual_dir(output_path: str, profile_id: str = "default",
         "root": output_path,
         "files": per_file,
         "by_category": total_by_cat,
-        "summary": {"scanned": n_pass + n_fail, "passed": n_pass, "flagged": n_fail},
+        # `confident` = hits that fail a study; `findings` includes the lower-score
+        # ML hits shown for review only, so a reviewer can see the noise volume.
+        "summary": {"scanned": n_pass + n_fail, "passed": n_pass, "flagged": n_fail,
+                    "findings": n_findings, "confident": n_confident},
         "passed": n_fail == 0,
     }
 

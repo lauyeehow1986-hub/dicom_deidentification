@@ -45,6 +45,12 @@ residual_scan_paths <- function(paths, profile_id = "default", scan_fn = NULL) {
     total_findings = sum(vapply(results,
                                 function(r) .as_int((r$counts %||% list())$total),
                                 integer(1))),
+    # `total_confident` = hits that actually fail a study (deterministic, or ML
+    # above the higher bar); `total_findings` also counts the low-confidence ML
+    # guesses shown for review only, so the reviewer can gauge the noise volume.
+    total_confident = sum(vapply(results,
+                                 function(r) .as_int((r$counts %||% list())$confident),
+                                 integer(1))),
     passed = all(passed_vec)
   )
 }
@@ -53,14 +59,16 @@ residual_scan_paths <- function(paths, profile_id = "default", scan_fn = NULL) {
 qa_files_df <- function(results) {
   if (!length(results)) {
     return(data.frame(File = character(), Findings = integer(),
-                      Categories = character(), IdentityRemoved = character(),
-                      Verdict = character(), stringsAsFactors = FALSE))
+                      Confirmed = integer(), Categories = character(),
+                      IdentityRemoved = character(), Verdict = character(),
+                      stringsAsFactors = FALSE))
   }
   rows <- lapply(results, function(r) {
     cats <- names(r$by_category %||% list())
     data.frame(
       File = basename(r$path %||% ""),
       Findings = .as_int((r$counts %||% list())$total),
+      Confirmed = .as_int((r$counts %||% list())$confident),
       Categories = if (length(cats)) paste(cats, collapse = ", ") else "",
       IdentityRemoved = if (is.null(r$identity_removed) ||
                             (length(r$identity_removed) == 1 && is.na(r$identity_removed))) {
@@ -78,7 +86,8 @@ qa_findings_df <- function(results) {
   empty <- data.frame(File = character(), Location = character(),
                       Field = character(), Category = character(),
                       Source = character(), Score = numeric(),
-                      Preview = character(), stringsAsFactors = FALSE)
+                      Confidence = character(), Preview = character(),
+                      stringsAsFactors = FALSE)
   rows <- list()
   for (r in results) {
     for (f in (r$findings %||% list())) {
@@ -89,6 +98,9 @@ qa_findings_df <- function(results) {
         Category = f$category %||% "",
         Source = f$source %||% "",
         Score = as.numeric(f$score %||% NA_real_),
+        # "confirmed" hits fail a study; "review" hits are low-confidence ML
+        # guesses surfaced for a human to glance at, not gate on.
+        Confidence = if (isTRUE(f$confident)) "confirmed" else "review",
         Preview = f$preview %||% "",
         stringsAsFactors = FALSE
       )

@@ -232,8 +232,11 @@ mod_qa_server <- function(id, app_state) {
                      if (ok) "bg-success" else "bg-danger"),
                     if (ok) "PASS \u2014 no residual PHI" else "FLAGGED \u2014 residual PHI found"),
         shiny::span(class = "ms-3 text-muted",
-          sprintf("%d scanned \u00b7 %d passed \u00b7 %d flagged \u00b7 %d finding(s)",
-                  res$n_files, res$n_passed, res$n_flagged, res$total_findings)))
+          sprintf(paste("%d scanned \u00b7 %d passed \u00b7 %d flagged \u00b7",
+                        "%d confirmed hit(s), %d low-confidence for review"),
+                  res$n_files, res$n_passed, res$n_flagged,
+                  res$total_confident %||% res$total_findings,
+                  max(0L, (res$total_findings %||% 0L) - (res$total_confident %||% 0L)))))
     })
 
     output$categories <- shiny::renderUI({
