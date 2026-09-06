@@ -53,6 +53,63 @@ def test_random_alnum_is_not_an_nric():
     assert ts.find_nric_fin("Series AB12 protocol X7") == []
 
 
+# --- Singapore temporary IC (X/Y prefix) ------------------------------------
+
+@pytest.mark.parametrize("val", ["X1234567A", "Y1234567E", "x1234567a",
+                                 "X1234567890A", "Y1234567890B", "y1234567890b"])
+def test_finds_temp_ic_seven_and_ten_digit_any_case(val):
+    spans = ts.find_temp_ic(f"patient temp IC {val} on file")
+    assert len(spans) == 1, val
+    assert spans[0].text == val
+    assert spans[0].category == "temp_ic"
+
+
+def test_temp_ic_ignores_wrong_shape_and_id_glued_runs():
+    assert ts.find_temp_ic("Z1234567A") == []          # only X/Y prefix
+    assert ts.find_temp_ic("X123456A") == []           # 6 digits: not 7 or 10
+    assert ts.find_temp_ic("X12345678A") == []         # 8 digits: not 7 or 10
+    assert ts.find_temp_ic("aX1234567Ab") == []        # glued inside a token
+
+
+def test_nric_and_temp_ic_do_not_cross_match():
+    # S-prefixed NRIC is not a temp IC; X-prefixed temp IC is not an NRIC.
+    assert ts.find_temp_ic("S1234567D") == []
+    assert ts.find_nric_fin("X1234567A") == []
+
+
+# --- Singapore admission case number (10 digits + letter) -------------------
+
+def test_finds_case_number_ten_digits_plus_letter():
+    spans = ts.find_case_number("Admission 1234567890A ward 5")
+    assert len(spans) == 1
+    assert spans[0].text == "1234567890A"
+    assert spans[0].category == "case_number"
+
+
+def test_case_number_needs_the_trailing_letter_and_exact_width():
+    assert ts.find_case_number("value 1234567890 units") == []   # no trailing letter
+    assert ts.find_case_number("id 123456789A end") == []        # only 9 digits
+    assert ts.find_case_number("id 12345678901A end") == []      # 11 digits
+
+
+def test_case_number_not_carved_out_of_a_hash_or_longer_run():
+    # A truncated hex pseudonym must not be misread as a case number.
+    assert ts.find_case_number("1234567890abcdef") == []
+    assert ts.find_case_number("id 1234567890abcdef end") == []
+    # a 10-digit temp IC (X-prefixed) is a temp IC, not a bare case number
+    assert ts.find_case_number("X1234567890A") == []
+
+
+def test_scanner_redacts_temp_ic_and_case_number():
+    scanner = ts.TextScanner(known_values=[], gazetteer=None,
+                             use_presidio=False, use_ner=False)
+    redacted, spans = scanner.redact("temp X1234567A case 1234567890A done")
+    assert "X1234567A" not in redacted
+    assert "1234567890A" not in redacted
+    cats = {s.category for s in spans}
+    assert {"temp_ic", "case_number"} <= cats
+
+
 # --- Email ------------------------------------------------------------------
 
 def test_finds_email():

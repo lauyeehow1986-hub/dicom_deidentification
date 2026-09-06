@@ -39,6 +39,8 @@ PLANTED = {
         "Michael O'Sullivan",           # Western/foreigner
     ],
     "nric_fin": ["S1234567D", "G9876543N"],
+    "temp_ic": ["X1234567A", "Y1234567890B"],   # hospital temporary IC (7- and 10-digit)
+    "case_number": ["1234567890A"],             # admission case number (10 digits + letter)
     "passport": ["E1234567"],
     "phone": ["+65 9123 4567", "62345678"],
     "email": ["patient@example.sg"],
@@ -111,7 +113,8 @@ def _base_ds(sop_class: str) -> Dataset:
     # free-text dates: a month-name form here (LT, no length cap) and a numeric
     # form in StudyDescription (LO) below - both action-C fields the scanner cleans.
     ds.ImageComments = (f"Contact {PLANTED['email'][0]} / {PLANTED['phone'][0]}"
-                        f"; DOB {PLANTED['dates'][1]}")
+                        f"; DOB {PLANTED['dates'][1]}; case {PLANTED['case_number'][0]}"
+                        f"; tmp {PLANTED['temp_ic'][0]} {PLANTED['temp_ic'][1]}")
     ds.StudyDescription = f"Echo for {PLANTED['names'][0]} on {PLANTED['dates'][0]}"
     ds.PatientAddress = PLANTED["address"][0]
     # --- planted private tag block ---
@@ -312,8 +315,8 @@ def build_corpus(out_dir: str) -> dict:
 # --------------------------------------------------------------------------- #
 _NIFTI_EXTS = (".nii", ".nii.gz")
 _NIFTI_TEXT_FIELDS = ("descrip", "aux_file", "intent_name")
-_LITERAL_CATS = ("names", "nric_fin", "passport", "phone", "email",
-                 "dates", "mrn", "accession", "address")
+_LITERAL_CATS = ("names", "nric_fin", "temp_ic", "case_number", "passport",
+                 "phone", "email", "dates", "mrn", "accession", "address")
 # VRs whose values are numeric/binary, never free-text PHI.
 _NONTEXT_VR = {"OB", "OW", "OF", "OD", "UN", "US", "SS", "FL", "FD",
                "SL", "SL", "UL", "AT", "FE"}

@@ -30,6 +30,26 @@ class NricFinRecognizer(PatternRecognizer):
         return check == expected   # True -> full score; False -> invalidated/low
 
 
+class SgTempIcRecognizer(PatternRecognizer):
+    """Singapore hospital temporary IC: X/Y prefix, 7 or 10 digits, a letter."""
+
+    PATTERNS = [Pattern("sg_temp_ic", r"\b[XY](?:\d{7}|\d{10})[A-Z]\b", 0.6)]
+
+    def __init__(self):
+        super().__init__(supported_entity="SG_TEMP_IC", patterns=self.PATTERNS,
+                         context=["ic", "temporary", "temp", "identity", "patient"])
+
+
+class SgCaseNumberRecognizer(PatternRecognizer):
+    """Singapore admission case number: ten digits followed by one letter."""
+
+    PATTERNS = [Pattern("sg_case_no", r"\b\d{10}[A-Za-z]\b", 0.5)]
+
+    def __init__(self):
+        super().__init__(supported_entity="SG_CASE_NUMBER", patterns=self.PATTERNS,
+                         context=["case", "admission", "visit", "encounter"])
+
+
 class SgPhoneRecognizer(PatternRecognizer):
     """Singapore phone number (optional +65, 8-digit local starting 3/6/8/9)."""
 
@@ -56,5 +76,6 @@ class SgPostalRecognizer(PatternRecognizer):
 
 def register_sg_recognizers(registry) -> None:
     """Add the SG recognisers to a Presidio ``RecognizerRegistry``."""
-    for rec in (NricFinRecognizer(), SgPhoneRecognizer(), SgPostalRecognizer()):
+    for rec in (NricFinRecognizer(), SgTempIcRecognizer(), SgCaseNumberRecognizer(),
+                SgPhoneRecognizer(), SgPostalRecognizer()):
         registry.add_recognizer(rec)

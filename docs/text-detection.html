@@ -128,7 +128,7 @@ models are present:</p>
 <tr>
 <td>3</td>
 <td><strong>SG recognisers</strong></td>
-<td>NRIC/FIN (<strong>checksum-validated</strong>), SG phone (<code>+65</code>/8-digit 3·6·8·9), email</td>
+<td>NRIC/FIN (<strong>checksum-validated</strong>), hospital <strong>temporary IC</strong> (<code>X</code>/<code>Y</code> + 7 or 10 digits + letter), <strong>admission case number</strong> (10 digits + letter), SG phone (<code>+65</code>/8-digit 3·6·8·9), email</td>
 <td>none (regex)</td>
 </tr>
 <tr>
@@ -166,6 +166,17 @@ number with a bad check digit (or an M-series FIN, whose scheme is less stable) 
 still flagged at a lower score, because in de-identification <strong>recall beats
 precision</strong> on identifiers. In Presidio the check digit <em>validates</em> the match
 (invalid → dropped); the always-on <code>find_nric_fin</code> layer remains the recall net.</p>
+<p>Two further SG healthcare identifier shapes are matched deterministically:</p>
+<ul>
+<li><strong>Temporary IC</strong> (<code>find_temp_ic</code>) — an <code>X</code> or <code>Y</code> prefix, 7 or 10 digits, and a
+trailing letter (e.g. <code>X1234567A</code>, <code>Y1234567890B</code>), assigned when a patient has
+no usable NRIC/FIN. No published check-letter algorithm exists for it, so it is
+matched at pattern tier (recall over precision).</li>
+<li><strong>Admission case number</strong> (<code>find_case_number</code>) — ten digits followed by one
+letter (e.g. <code>1234567890A</code>). A bare ten-digit run with no trailing letter does
+<strong>not</strong> match, and alphanumeric boundaries stop it carving a case number out of
+a longer identifier or a hashed pseudonym.</li>
+</ul>
 <h2>Dates in free text</h2>
 <p>Structured DICOM date tags (VR <code>DA</code>/<code>DT</code>/<code>TM</code>) are format-fixed by the standard
 and governed by the tag rules (<code>dates.mode: remove | shift | keep</code>) — there is no

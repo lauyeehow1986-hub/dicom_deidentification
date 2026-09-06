@@ -98,7 +98,32 @@ def find_phone(text: str) -> list[PhiSpan]:
             for m in _PHONE_RE.finditer(text or "")]
 
 
-SG_RECOGNISERS = (find_nric_fin, find_email, find_phone)
+# Singapore hospital temporary IC (assigned when a patient has no usable NRIC/FIN):
+# an X or Y prefix, 7 or 10 digits, and a trailing letter. There is no published
+# check-letter algorithm for it, so it stays pattern-tier (recall over precision).
+_TEMP_IC_RE = re.compile(
+    r"(?<![0-9A-Za-z])([XY])(\d{7}|\d{10})([A-Z])(?![0-9A-Za-z])", re.IGNORECASE)
+
+
+def find_temp_ic(text: str) -> list[PhiSpan]:
+    return [PhiSpan(m.start(), m.end(), "temp_ic", m.group(0), "sg", 0.7)
+            for m in _TEMP_IC_RE.finditer(text or "")]
+
+
+# Admission case number: ten digits followed by one letter (e.g. 1234567890A).
+# Alphanumeric boundaries stop it carving a run out of a hashed pseudonym or a
+# longer identifier; a bare 10-digit run (no trailing letter) does NOT match.
+_CASE_NO_RE = re.compile(
+    r"(?<![0-9A-Za-z])(\d{10})([A-Za-z])(?![0-9A-Za-z])")
+
+
+def find_case_number(text: str) -> list[PhiSpan]:
+    return [PhiSpan(m.start(), m.end(), "case_number", m.group(0), "sg", 0.7)
+            for m in _CASE_NO_RE.finditer(text or "")]
+
+
+SG_RECOGNISERS = (find_nric_fin, find_temp_ic, find_case_number,
+                  find_email, find_phone)
 
 
 # --------------------------------------------------------------------------- #
