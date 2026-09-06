@@ -42,6 +42,10 @@ PLANTED = {
     "passport": ["E1234567"],
     "phone": ["+65 9123 4567", "62345678"],
     "email": ["patient@example.sg"],
+    # Individual-linked dates written into FREE TEXT (not the structured date
+    # tags): a day-first numeric and a month-name form, so the survivor sweep
+    # exercises the free-text date recogniser, not just literal tag removal.
+    "dates": ["15/01/2024", "01 Jan 1970"],
     "mrn": ["MRN0099887"],
     "accession": ["ACC-2024-000123"],
     "address": ["Blk 123 Bishan St 12 #08-45", "Singapore 570123"],
@@ -104,8 +108,11 @@ def _base_ds(sop_class: str) -> Dataset:
     ds.PatientBirthDate = "19700101"
     ds.StudyDate = "20240115"
     # --- planted free-text ---
-    ds.ImageComments = f"Contact {PLANTED['email'][0]} / {PLANTED['phone'][0]}"
-    ds.StudyDescription = f"Echo for {PLANTED['names'][0]}"   # Malay name in free text
+    # free-text dates: a month-name form here (LT, no length cap) and a numeric
+    # form in StudyDescription (LO) below - both action-C fields the scanner cleans.
+    ds.ImageComments = (f"Contact {PLANTED['email'][0]} / {PLANTED['phone'][0]}"
+                        f"; DOB {PLANTED['dates'][1]}")
+    ds.StudyDescription = f"Echo for {PLANTED['names'][0]} on {PLANTED['dates'][0]}"
     ds.PatientAddress = PLANTED["address"][0]
     # --- planted private tag block ---
     block = ds.private_block(0x0011, _PRIVATE_CREATOR, create=True)
@@ -306,7 +313,7 @@ def build_corpus(out_dir: str) -> dict:
 _NIFTI_EXTS = (".nii", ".nii.gz")
 _NIFTI_TEXT_FIELDS = ("descrip", "aux_file", "intent_name")
 _LITERAL_CATS = ("names", "nric_fin", "passport", "phone", "email",
-                 "mrn", "accession", "address")
+                 "dates", "mrn", "accession", "address")
 # VRs whose values are numeric/binary, never free-text PHI.
 _NONTEXT_VR = {"OB", "OW", "OF", "OD", "UN", "US", "SS", "FL", "FD",
                "SL", "SL", "UL", "AT", "FE"}

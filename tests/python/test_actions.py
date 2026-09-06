@@ -76,6 +76,19 @@ def test_S_shifts_a_date_by_the_context_offset():
     assert str(ds[0x00080020].value) == "20240315"
 
 
+def test_S_shifts_datetime_date_part_and_keeps_time_and_zone():
+    # AcquisitionDateTime (DT): only the leading YYYYMMDD shifts; time + tz stay.
+    ds = ds_with(0x0008002A, "20240310134500.000000+0800", vr="DT")
+    A.apply_action(ds, 0x0008002A, "S", ctx(date_offset=5))
+    assert str(ds[0x0008002A].value) == "20240315134500.000000+0800"
+
+
+def test_S_shifts_bare_datetime_without_time():
+    ds = ds_with(0x0008002A, "20240310", vr="DT")
+    A.apply_action(ds, 0x0008002A, "S", ctx(date_offset=-1))
+    assert str(ds[0x0008002A].value) == "20240309"
+
+
 def test_D_pseudonymises_a_name_deterministically():
     ds1 = ds_with(0x00100010, "Nurul Aisyah Binte Rahman")
     ds2 = ds_with(0x00100010, "Nurul Aisyah Binte Rahman")

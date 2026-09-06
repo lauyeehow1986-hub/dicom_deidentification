@@ -53,6 +53,8 @@ _KNOWN_VALUE_TAGS = (
     0x00080090,  # ReferringPhysicianName
     0x00080050,  # AccessionNumber
     0x00101000,  # OtherPatientIDs
+    0x00100030,  # PatientBirthDate  (scrub the literal DOB from free text/pixels)
+    0x00080020,  # StudyDate         (individual-linked date literal)
 )
 
 # DICOM PS3.15 Annex E action codes + app extensions (H hash, S date-shift).
@@ -228,7 +230,9 @@ def _build_scanner(td: dict, known_values):
         custom_regex=td.get("custom_regex") or [],
         use_presidio=bool(td.get("use_presidio", False)),
         use_ner=bool(td.get("use_ner", False)),
-        ner_model=_resolve_ner_model(td.get("ner_model")))
+        ner_model=_resolve_ner_model(td.get("ner_model")),
+        detect_dates=bool(td.get("detect_dates", True)),
+        dates_include_bare=bool(td.get("dates_include_bare", False)))
 
 
 def deidentify_dataset(ds, profile: dict, salt: bytes, scanner=None) -> dict:

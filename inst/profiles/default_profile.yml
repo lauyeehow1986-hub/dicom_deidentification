@@ -93,6 +93,12 @@ text_detection:
   use_presidio: true               # general PII; needs a spaCy model bundled on the box
   use_ner: true                    # multilingual XLM-R person/location
   ner_model: "models/xlm-roberta-base-ner-hrl"  # local NER model DIR (CPU), relative to inst/; empty -> layer off
+  detect_dates: true               # scrub individual-linked dates written into FREE TEXT
+                                   # (dd/mm/yyyy, yyyy-mm-dd, ISO date-time, "01 Jan 2024").
+                                   # Structured DICOM date TAGS are governed by `dates.mode`.
+  dates_include_bare: false        # also flag bare ddmmyyyy/yyyymmdd/yyyymmddhhmmss runs.
+                                   # OPT-IN: these collide with numeric IDs; enable per project
+                                   # when reviewers accept the higher false-positive rate.
   # Deterministic project rules ({category, pattern, score}) run as a
   # high-precision `custom_regex` layer that both scrubs the value during de-id
   # (fields with action C) and fails the residual QA scan (a "confident" hit).

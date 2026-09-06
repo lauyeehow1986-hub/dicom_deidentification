@@ -102,6 +102,110 @@ SG_RECOGNISERS = (find_nric_fin, find_email, find_phone)
 
 
 # --------------------------------------------------------------------------- #
+# Layer 3b: dates in FREE TEXT (deterministic)                                #
+# --------------------------------------------------------------------------- #
+# Individual-linked dates are PHI wherever they appear. Structured DICOM date
+# VRs (DA/DT/TM) are format-fixed by the standard and handled by the action
+# map; this layer catches dates written into free-text / SR / PDF / pixel-OCR
+# strings, where they arrive in arbitrary human formats. Separated and
+# month-name forms are matched by default (low false-positive risk); bare
+# 8/14-digit runs collide with IDs, so they are opt-in via ``include_bare``.
+
+_MONTH_ALT = (r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|"
+              r"jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t)?(?:ember)?|"
+              r"oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)")
+
+# Numeric with a repeated separator: D-M-Y / M-D-Y / Y-M-D (sep in / - .).
+# The back-reference forces the SAME separator both times, so "1-2/3" is not a
+# date. Boundaries reject an alphanumeric neighbour so a date glued to an ID or
+# a hashed pseudonym is not carved out mid-token.
+_DATE_NUM_RE = re.compile(
+    r"(?<![0-9A-Za-z])(\d{1,4})([/.\-])(\d{1,2})\2(\d{1,4})(?![0-9A-Za-z])")
+
+# ISO date-time: yyyy-mm-dd, optional [ T]hh:mm[:ss] (covers "yyyy-mm-dd hh:mm:ss").
+_DATE_ISO_RE = re.compile(
+    r"(?<![0-9A-Za-z])(\d{4})-(\d{2})-(\d{2})"
+    r"(?:[ T](\d{2}):(\d{2})(?::\d{2})?)?(?![0-9A-Za-z])")
+
+# Month-name forms: "1 Jan 2024" / "01 January 2024" / "1st Jan 2024".
+_DATE_DMY_NAME_RE = re.compile(
+    r"(?<![0-9A-Za-z])(\d{1,2})(?:st|nd|rd|th)?[ \-]" + _MONTH_ALT +
+    r"[ ,\-]+(\d{2,4})(?![0-9A-Za-z])", re.IGNORECASE)
+# Month-first forms: "Jan 1, 2024" / "January 1 2024".
+_DATE_MDY_NAME_RE = re.compile(
+    r"(?<![A-Za-z])" + _MONTH_ALT + r"\.?[ \-](\d{1,2})(?:st|nd|rd|th)?"
+    r"[ ,\-]+(\d{2,4})(?![0-9A-Za-z])", re.IGNORECASE)
+
+# Bare compact runs (opt-in): yyyymmdd / ddmmyyyy / mmddyyyy and yyyymmddhhmmss.
+_DATE_BARE8_RE = re.compile(r"(?<![0-9A-Za-z])(\d{8})(?![0-9A-Za-z])")
+_DATE_BARE14_RE = re.compile(r"(?<![0-9A-Za-z])(\d{14})(?![0-9A-Za-z])")
+
+
+def _dm_plausible(a: int, b: int) -> bool:
+    """True if (a, b) works as day/month in EITHER order (dd/mm vs mm/dd)."""
+    return (1 <= a <= 31 and 1 <= b <= 12) or (1 <= b <= 31 and 1 <= a <= 12)
+
+
+def _ymd_from_bare(s: str):
+    """Return (y, m, d) if the 8-digit run reads as a plausible calendar date in
+    YYYYMMDD or [DM]M[DM]MYYYY layout with a 1900-2099 year; else None."""
+    # YYYYMMDD
+    y, m, d = int(s[:4]), int(s[4:6]), int(s[6:8])
+    if 1900 <= y <= 2099 and 1 <= m <= 12 and 1 <= d <= 31:
+        return (y, m, d)
+    # DDMMYYYY / MMDDYYYY (year at the end)
+    y2, a, b = int(s[4:8]), int(s[:2]), int(s[2:4])
+    if 1900 <= y2 <= 2099 and _dm_plausible(a, b):
+        return (y2, a, b)
+    return None
+
+
+def find_dates(text: str, include_bare: bool = False) -> list[PhiSpan]:
+    """Find individual-linked dates in free text.
+
+    Separated (``dd/mm/yyyy``, ``yyyy-mm-dd``, ISO date-time) and month-name
+    (``01 Jan 2024``, ``Jan 1, 2024``) formats are always scanned. When
+    ``include_bare`` is set, bare ``ddmmyyyy`` / ``yyyymmdd`` / ``yyyymmddhhmmss``
+    runs are added too, validated as plausible calendar dates to limit the
+    false positives that bare 8-digit IDs would otherwise cause.
+    """
+    out: list[PhiSpan] = []
+
+    def _add(start: int, end: int, score: float):
+        # Skip a candidate that overlaps one already accepted; the ISO matcher
+        # runs first, so its wider date-time span wins over the bare date part.
+        for s in out:
+            if start < s.end and s.start < end:
+                return
+        out.append(PhiSpan(start, end, "date", (text or "")[start:end], "date", score))
+
+    text = text or ""
+    for m in _DATE_ISO_RE.finditer(text):
+        if 1 <= int(m.group(2)) <= 12 and 1 <= int(m.group(3)) <= 31:
+            _add(m.start(), m.end(), 0.85)
+    for m in _DATE_NUM_RE.finditer(text):
+        a, c = m.group(1), m.group(4)
+        if len(a) == 4 and len(c) <= 2:                 # Y sep M sep D
+            if 1 <= int(m.group(3)) <= 12 and 1 <= int(c) <= 31:
+                _add(m.start(), m.end(), 0.8)
+        elif len(c) in (2, 4) and len(a) <= 2:          # D/M/Y or M/D/Y
+            if _dm_plausible(int(a), int(m.group(3))):
+                _add(m.start(), m.end(), 0.8)
+    for rx in (_DATE_DMY_NAME_RE, _DATE_MDY_NAME_RE):
+        for m in rx.finditer(text):
+            if 1 <= int(m.group(1)) <= 31:
+                _add(m.start(), m.end(), 0.9)
+    if include_bare:
+        for m in _DATE_BARE14_RE.finditer(text):
+            if _ymd_from_bare(m.group(1)[:8]):
+                _add(m.start(), m.end(), 0.6)
+        for m in _DATE_BARE8_RE.finditer(text):
+            if _ymd_from_bare(m.group(1)):
+                _add(m.start(), m.end(), 0.6)
+    return out
+
+
+# --------------------------------------------------------------------------- #
 # Layer 2: gazetteer                                                          #
 # --------------------------------------------------------------------------- #
 
@@ -162,10 +266,13 @@ class TextScanner:
     def __init__(self, known_values=None, gazetteer=None,
                  custom_regex=None, use_presidio=False, use_ner=False,
                  ner_model=None, presidio_languages=("en",),
-                 presidio_min_score=0.35):
+                 presidio_min_score=0.35, detect_dates=True,
+                 dates_include_bare=False):
         self.known_values = list(known_values or [])
         self.gazetteer = gazetteer
         self.presidio_min_score = presidio_min_score
+        self.detect_dates = detect_dates
+        self.dates_include_bare = dates_include_bare
         self.notes: list[str] = []
         self._custom = self._compile_custom(custom_regex)
         self._analyzer = self._load_presidio(presidio_languages) if use_presidio else None
@@ -312,6 +419,8 @@ class TextScanner:
             spans += self.gazetteer.find(text)
         for rec in SG_RECOGNISERS:
             spans += rec(text)
+        if self.detect_dates:
+            spans += find_dates(text, include_bare=self.dates_include_bare)
         spans += self._custom_spans(text)
         spans += self._presidio_spans(text)
         spans += self._ner_spans(text)

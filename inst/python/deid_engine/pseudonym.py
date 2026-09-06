@@ -58,3 +58,19 @@ def shift_dicom_date(dicom_date: str, offset_days: int) -> str:
     d = date(int(s[:4]), int(s[4:6]), int(s[6:8]))
     shifted = d + timedelta(days=offset_days)
     return f"{shifted.year:04d}{shifted.month:02d}{shifted.day:02d}"
+
+
+def shift_dicom_datetime(dicom_dt: str, offset_days: int) -> str:
+    """Shift the date part of a DICOM ``DT`` value by ``offset_days``.
+
+    A ``DT`` is ``YYYYMMDD`` optionally followed by ``HHMMSS.FFFFFF`` and a
+    ``&ZZXX`` timezone; only the leading date is shifted, so the time-of-day,
+    fractional seconds, and timezone are preserved and intervals stay
+    consistent. Blank / partial (no full 8-digit date) values pass through.
+    """
+    if not dicom_dt:
+        return dicom_dt
+    s = dicom_dt.strip()
+    if len(s) < 8 or not s[:8].isdigit():
+        return dicom_dt  # not a full YYYYMMDD prefix -> leave untouched
+    return shift_dicom_date(s[:8], offset_days) + s[8:]

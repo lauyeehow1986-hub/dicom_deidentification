@@ -224,3 +224,78 @@ def test_deterministic_layers_alone_miss_unlisted_bystander_name():
     spans = [s for s in scanner.scan("Referred by Dr Tan Chorh Chuan for MRI.")
              if s.category == "name"]
     assert spans == []
+
+
+# --- Dates in free text (deterministic) ------------------------------------
+# Structured DICOM date VRs are format-fixed and handled by the action map;
+# these pin the FREE-TEXT date recall in the human formats a reviewer worries
+# about. Separated + month-name forms are on by default; bare 8/14-digit runs
+# are opt-in because they collide with IDs.
+
+@pytest.mark.parametrize("s", [
+    "DOB 15/01/2024 noted",
+    "seen 15-01-2024",
+    "on 15.01.2024",
+    "study 2024-01-15",
+    "acquired 2024-01-15 13:45:00",
+    "born 1 Jan 2024",
+    "born 01 January 2024",
+    "dated 1st Jan 2024",
+    "on Jan 1, 2024 today",
+    "on January 1 2024 here",
+])
+def test_finds_separated_and_month_name_dates_by_default(s):
+    spans = [x for x in ts.find_dates(s) if x.category == "date"]
+    assert len(spans) == 1, s
+    assert spans[0].source == "date"
+
+
+def test_iso_datetime_span_covers_the_time_part():
+    spans = ts.find_dates("acquired 2024-01-15 13:45:00 done")
+    assert len(spans) == 1
+    assert spans[0].text == "2024-01-15 13:45:00"
+
+
+def test_bare_eight_digit_date_is_off_by_default_on_by_toggle():
+    # A bare yyyymmdd is ambiguous with an ID, so it is NOT flagged by default.
+    assert ts.find_dates("scan 20240115 end") == []
+    spans = ts.find_dates("scan 20240115 end", include_bare=True)
+    assert len(spans) == 1 and spans[0].text == "20240115"
+
+
+def test_bare_ddmmyyyy_and_datetime_when_enabled():
+    assert [s.text for s in ts.find_dates("d 15012024 x", include_bare=True)] == ["15012024"]
+    # yyyymmddhhmmss compact stamp
+    assert [s.text for s in ts.find_dates("t 20240115134500 x", include_bare=True)] == \
+        ["20240115134500"]
+
+
+def test_bare_toggle_ignores_implausible_and_id_like_runs():
+    # Not a calendar date (month 99) -> not flagged even with bare enabled.
+    assert ts.find_dates("id 99999999 x", include_bare=True) == []
+    # An 8-digit run glued to hex is an ID token, not a date (boundary guard).
+    assert ts.find_dates("87591237cef8", include_bare=True) == []
+
+
+def test_does_not_mistake_ratios_ip_or_versions_for_dates():
+    assert ts.find_dates("ratio 1/2/3 here") == []          # 1-digit "year"
+    assert ts.find_dates("host 192.168.1.1 up") == []       # octets, not d/m/y
+    assert ts.find_dates("v1.2.3 released") == []
+
+
+def test_scanner_redacts_a_free_text_date_by_default():
+    scanner = ts.TextScanner(known_values=[], gazetteer=None,
+                             use_presidio=False, use_ner=False)
+    redacted, spans = scanner.redact("Echo on 15/01/2024 normal")
+    assert "15/01/2024" not in redacted
+    assert "Echo on" in redacted and "normal" in redacted
+    assert any(s.category == "date" for s in spans)
+
+
+def test_scanner_bare_dates_follow_the_toggle():
+    off = ts.TextScanner(known_values=[], gazetteer=None,
+                         use_presidio=False, use_ner=False)
+    assert "20240115" in off.redact("stamp 20240115 x")[0]
+    on = ts.TextScanner(known_values=[], gazetteer=None, use_presidio=False,
+                        use_ner=False, dates_include_bare=True)
+    assert "20240115" not in on.redact("stamp 20240115 x")[0]

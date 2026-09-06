@@ -79,7 +79,10 @@ def apply_action(ds, tag: int, code: str, ctx: DeidContext) -> dict[str, Any]:
     elif code == "S":
         if vr == "DA":
             elem.value = ps.shift_dicom_date(orig_str, ctx.date_offset)
-        # TM/DT and non-date VRs are left untouched at this phase
+        elif vr == "DT":
+            elem.value = ps.shift_dicom_datetime(orig_str, ctx.date_offset)
+        # TM carries no date component (time-of-day is not an individual-linked
+        # date); non-date VRs are left untouched.
     elif code == "C":
         if ctx.scanner is not None:
             redacted, spans = ctx.scanner.redact(orig_str, replacement=" ")
