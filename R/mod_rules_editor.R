@@ -74,6 +74,14 @@ mod_rules_editor_ui <- function(id) {
             shiny::checkboxInput(ns("td_ner"), "Transformer NER (needs local model)", FALSE)
           ),
           shiny::div(
+            shiny::checkboxInput(ns("td_dates"), "Scrub dates in free text", TRUE),
+            shiny::checkboxInput(ns("td_dates_bare"),
+                                 "Also flag bare 8-digit dates (may hit numeric IDs)", FALSE),
+            shiny::p(class = "small text-muted",
+                     paste("Free-text dates only (dd/mm/yyyy, yyyy-mm-dd, ISO date-time,",
+                           "\"01 Jan 2024\"). Structured DICOM date tags follow the Dates",
+                           "policy above. The bare-8-digit option adds ddmmyyyy / yyyymmdd",
+                           "runs — higher recall, more false positives on IDs.")),
             shiny::textInput(ns("td_ner_model"), "NER model directory (local)", ""),
             shiny::p(class = "small text-muted",
                      "Gazetteers and custom-regex rules are grown in the Tagging tab; the read-outs below reflect this project.")
@@ -183,6 +191,8 @@ mod_rules_editor_server <- function(id, app_state) {
       set_chk("td_header", td$header_token_scrub, TRUE)
       set_chk("td_presidio", td$use_presidio, TRUE)
       set_chk("td_ner", td$use_ner, FALSE)
+      set_chk("td_dates", td$detect_dates, TRUE)
+      set_chk("td_dates_bare", td$dates_include_bare, FALSE)
       shiny::updateTextInput(session, "td_ner_model", value = td$ner_model %||% "")
     }
 
@@ -428,6 +438,8 @@ mod_rules_editor_server <- function(id, app_state) {
       prof$text_detection$header_token_scrub <- isTRUE(input$td_header)
       prof$text_detection$use_presidio <- isTRUE(input$td_presidio)
       prof$text_detection$use_ner <- isTRUE(input$td_ner)
+      prof$text_detection$detect_dates <- isTRUE(input$td_dates)
+      prof$text_detection$dates_include_bare <- isTRUE(input$td_dates_bare)
       prof$text_detection$ner_model <- input$td_ner_model
       prof
     }

@@ -14,9 +14,10 @@ models are present:
 
 | # | Layer | What it catches | Dependency |
 |---|-------|-----------------|------------|
-| 1 | **Header-token scrub** | The *this-study* real name/ID tokens (from PatientName, PatientID, physician names, AccessionNumber, OtherPatientIDs) hunted wherever they reappear | none |
+| 1 | **Header-token scrub** | The *this-study* real name/ID tokens (from PatientName, PatientID, physician names, AccessionNumber, OtherPatientIDs, **PatientBirthDate, StudyDate**) hunted wherever they reappear | none |
 | 2 | **Gazetteer** | Names from the user's SG multiracial + foreigner name list (word-boundary, case-insensitive) | a name-list file |
 | 3 | **SG recognisers** | NRIC/FIN (**checksum-validated**), SG phone (`+65`/8-digit 3·6·8·9), email | none (regex) |
+| 3b | **Dates in free text** | Individual-linked dates written as text: `dd/mm/yyyy`, `dd-mm-yyyy`, `yyyy-mm-dd`, ISO date-time, and `01 Jan 2024` / `Jan 1, 2024`. Bare `ddmmyyyy`/`yyyymmdd`/`yyyymmddhhmmss` behind an opt-in toggle | none (regex) |
 | 4 | **Presidio** | General PII (PERSON, LOCATION, DATE_TIME, …) + the SG recognisers as Presidio entities | `presidio-analyzer` + a spaCy model |
 | 5 | **Transformer NER** | Multilingual person/location (XLM-R class), for names the gazetteer misses | `torch`/`transformers` + a **local** model dir |
 
@@ -39,16 +40,41 @@ still flagged at a lower score, because in de-identification **recall beats
 precision** on identifiers. In Presidio the check digit *validates* the match
 (invalid → dropped); the always-on `find_nric_fin` layer remains the recall net.
 
+## Dates in free text
+
+Structured DICOM date tags (VR `DA`/`DT`/`TM`) are format-fixed by the standard
+and governed by the tag rules (`dates.mode: remove | shift | keep`) — there is no
+`dd/mm` vs `mm/dd` ambiguity in a tag value. Dates written into **free text,
+Structured Reports, encapsulated PDFs, and burned-in pixel OCR** arrive in
+arbitrary human formats, so a dedicated deterministic layer scrubs them there:
+
+- **On by default** (`detect_dates`): separated forms (`15/01/2024`, `15-01-2024`,
+  `2024-01-15`), ISO date-time (`2024-01-15 13:45:00`), and month-name forms
+  (`01 Jan 2024`, `1st January 2024`, `Jan 1, 2024`). Candidates are validated to
+  reject IP addresses, ratios, version strings, and impossible calendar values.
+- **Opt-in** (`dates_include_bare`): bare compact runs `ddmmyyyy` / `yyyymmdd` /
+  `yyyymmddhhmmss`, validated as plausible calendar dates. These collide with
+  numeric IDs, so they are **off by default**; enable per project when reviewers
+  accept the higher false-positive rate. Both toggles are exposed in the
+  **Rules & Profiles** tab.
+
+The patient's own `PatientBirthDate` / `StudyDate` are additionally hunted as
+literal header tokens (layer 1), so the exact DOB is scrubbed from text/pixels
+even with the bare toggle off. Under `dates.mode: shift`, `DT` tags shift their
+date part while preserving the time-of-day and timezone.
+
 ## Configuration (`text_detection:` in the profile)
 
 ```yaml
 text_detection:
   enabled: true
   header_token_scrub: true
-  gazetteer_file: ""     # path to the SG name list (one name per line)
-  use_presidio: true     # needs a spaCy model installed in the venv
-  use_ner: true          # multilingual XLM-R
-  ner_model: ""          # path to the bundled local NER model DIRECTORY; empty -> off
+  gazetteer_file: ""       # path to the SG name list (one name per line)
+  use_presidio: true       # needs a spaCy model installed in the venv
+  use_ner: true            # multilingual XLM-R
+  ner_model: ""            # path to the bundled local NER model DIRECTORY; empty -> off
+  detect_dates: true       # scrub free-text dates (separated + month-name forms)
+  dates_include_bare: false # also flag bare ddmmyyyy/yyyymmdd runs (collide with IDs)
 ```
 
 The scanner is built **once per study** and reused across every file, so the

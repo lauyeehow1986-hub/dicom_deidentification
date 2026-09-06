@@ -116,7 +116,7 @@ models are present:</p>
 <tr>
 <td>1</td>
 <td><strong>Header-token scrub</strong></td>
-<td>The <em>this-study</em> real name/ID tokens (from PatientName, PatientID, physician names, AccessionNumber, OtherPatientIDs) hunted wherever they reappear</td>
+<td>The <em>this-study</em> real name/ID tokens (from PatientName, PatientID, physician names, AccessionNumber, OtherPatientIDs, <strong>PatientBirthDate, StudyDate</strong>) hunted wherever they reappear</td>
 <td>none</td>
 </tr>
 <tr>
@@ -129,6 +129,12 @@ models are present:</p>
 <td>3</td>
 <td><strong>SG recognisers</strong></td>
 <td>NRIC/FIN (<strong>checksum-validated</strong>), SG phone (<code>+65</code>/8-digit 3·6·8·9), email</td>
+<td>none (regex)</td>
+</tr>
+<tr>
+<td>3b</td>
+<td><strong>Dates in free text</strong></td>
+<td>Individual-linked dates written as text: <code>dd/mm/yyyy</code>, <code>dd-mm-yyyy</code>, <code>yyyy-mm-dd</code>, ISO date-time, and <code>01 Jan 2024</code> / <code>Jan 1, 2024</code>. Bare <code>ddmmyyyy</code>/<code>yyyymmdd</code>/<code>yyyymmddhhmmss</code> behind an opt-in toggle</td>
 <td>none (regex)</td>
 </tr>
 <tr>
@@ -160,14 +166,37 @@ number with a bad check digit (or an M-series FIN, whose scheme is less stable) 
 still flagged at a lower score, because in de-identification <strong>recall beats
 precision</strong> on identifiers. In Presidio the check digit <em>validates</em> the match
 (invalid → dropped); the always-on <code>find_nric_fin</code> layer remains the recall net.</p>
+<h2>Dates in free text</h2>
+<p>Structured DICOM date tags (VR <code>DA</code>/<code>DT</code>/<code>TM</code>) are format-fixed by the standard
+and governed by the tag rules (<code>dates.mode: remove | shift | keep</code>) — there is no
+<code>dd/mm</code> vs <code>mm/dd</code> ambiguity in a tag value. Dates written into <strong>free text,
+Structured Reports, encapsulated PDFs, and burned-in pixel OCR</strong> arrive in
+arbitrary human formats, so a dedicated deterministic layer scrubs them there:</p>
+<ul>
+<li><strong>On by default</strong> (<code>detect_dates</code>): separated forms (<code>15/01/2024</code>, <code>15-01-2024</code>,
+<code>2024-01-15</code>), ISO date-time (<code>2024-01-15 13:45:00</code>), and month-name forms
+(<code>01 Jan 2024</code>, <code>1st January 2024</code>, <code>Jan 1, 2024</code>). Candidates are validated to
+reject IP addresses, ratios, version strings, and impossible calendar values.</li>
+<li><strong>Opt-in</strong> (<code>dates_include_bare</code>): bare compact runs <code>ddmmyyyy</code> / <code>yyyymmdd</code> /
+<code>yyyymmddhhmmss</code>, validated as plausible calendar dates. These collide with
+numeric IDs, so they are <strong>off by default</strong>; enable per project when reviewers
+accept the higher false-positive rate. Both toggles are exposed in the
+<strong>Rules &amp; Profiles</strong> tab.</li>
+</ul>
+<p>The patient’s own <code>PatientBirthDate</code> / <code>StudyDate</code> are additionally hunted as
+literal header tokens (layer 1), so the exact DOB is scrubbed from text/pixels
+even with the bare toggle off. Under <code>dates.mode: shift</code>, <code>DT</code> tags shift their
+date part while preserving the time-of-day and timezone.</p>
 <h2>Configuration (<code>text_detection:</code> in the profile)</h2>
 <pre><code class="language-yaml">text_detection:
   enabled: true
   header_token_scrub: true
-  gazetteer_file: &quot;&quot;     # path to the SG name list (one name per line)
-  use_presidio: true     # needs a spaCy model installed in the venv
-  use_ner: true          # multilingual XLM-R
-  ner_model: &quot;&quot;          # path to the bundled local NER model DIRECTORY; empty -&gt; off
+  gazetteer_file: &quot;&quot;       # path to the SG name list (one name per line)
+  use_presidio: true       # needs a spaCy model installed in the venv
+  use_ner: true            # multilingual XLM-R
+  ner_model: &quot;&quot;            # path to the bundled local NER model DIRECTORY; empty -&gt; off
+  detect_dates: true       # scrub free-text dates (separated + month-name forms)
+  dates_include_bare: false # also flag bare ddmmyyyy/yyyymmdd runs (collide with IDs)
 </code></pre>
 <p>The scanner is built <strong>once per study</strong> and reused across every file, so the
 optional models load a single time even for a large batch.</p>
